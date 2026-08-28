@@ -1,0 +1,233 @@
+import { describe, expect, it, vi } from 'vitest'
+import { MonitoringClient, MonitoringError } from '../src/client.ts'
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+function prom(body: unknown): Response {
+  return json({ status: 'success', data: body })
+}
+
+function am(body: unknown): Response {
+  return json(body)
+}
+
+function requestInit(fetchImpl: ReturnType<typeof vi.fn>, callIndex = 0): RequestInit {
+  return (fetchImpl.mock.calls[callIndex] as [string, RequestInit])[1]
+}
+
+describe('MonitoringClient', () => {
+  it('runs a Prometheus instant query and maps vector results', async () => {
+    const fetchImpl = vi.fn()
+    fetchImpl.mockResolvedValueOnce(prom({
+      resultType: 'vector',
+      result: [
+        {
+          metric: { __name__: 'up', instance: 'localhost:9090' },
+          value: [1700000000, '1'],
+        },
+      ],
+    }))
+    const client = new MonitoringClient({
+      prometheusBaseUrl: 'http://prom:9090',
+      prometheusToken: 'tok',
+      fetchImpl,
+    })
+    const result = await client.query('up', { time: '2026-08-28T00:00:00Z' })
+
+    expect(result).toMatchObject({
+      connected: true,
+      resultType: 'vector',
+      seriesCount: 1,
+    })
+    expect(JSON.parse(result.resultJson)[0].metric.__name__).toBe('up')
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://prom:9090/api/v1/query?query=up&time=2026-08-28T00%3A00%3A00Z',
+    )
+    expect(requestInit(fetchImpl).headers).toMatchObject({ authorization: 'Bearer tok' })
+  })
+
+  it('runs a Prometheus range query with start, end, and step', async () => {
+    const fetchImpl = vi.fn(async () => prom({
+      resultType: 'matrix',
+      result: [{ metric: { __name__: 'up' }, values: [[1700000000, '1']] }],
+    }))
+    const client = new MonitoringClient({ fetchImpl })
+    const result = await client.queryRange('rate(http_requests_total[5m])', {
+      start: '1700000000',
+      end: '1700003600',
+      step: '60s',
+    })
+
+    expect(result.seriesCount).toBe(1)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://localhost:9090/api/v1/query_range?query=rate(http_requests_total%5B5m%5D)&start=1700000000&end=1700003600&step=60s',
+    )
+  })
+
+  it('lists Prometheus targets with active and dropped counts', async () => {
+    const fetchImpl = vi.fn(async () => prom({
+      activeTargets: [{
+        scrapeUrl: 'http://node:9100/metrics',
+        health: 'up',
+        lastError: '',
+        labels: { job: 'node' },
+      }],
+      droppedTargets: [{ scrapeUrl: 'http://old:9100/metrics', health: 'unknown', lastError: 'no response', labels: {} }],
+    }))
+    const client = new MonitoringClient({ fetchImpl })
+    const result = await client.listTargets()
+    expect(result).toMatchObject({ connected: true, activeCount: 1, droppedCount: 1 })
+    expect(result.items[0].labelsJson).toContain('node')
+  })
+
+  it('maps Prometheus alerts, rules, labels, label values, and TSDB status', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(prom({
+        alerts: [{
+          state: 'firing',
+          value: '1e+00',
+          activeAt: '2026-08-28T00:00:00Z',
+          labels: { alertname: 'HighCPU' },
+          annotations: { summary: 'CPU high' },
+        }],
+      }))
+      .mockResolvedValueOnce(prom({
+        groups: [{
+          name: 'rules',
+          rules: [{
+            name: 'job:up:sum',
+            type: 'recording',
+            health: 'ok',
+            query: 'sum(up)',
+            duration: '0s',
+            labels: {},
+            alerts: [],
+          }],
+        }],
+      }))
+      .mockResolvedValueOnce(prom(['__name__', 'job']))
+      .mockResolvedValueOnce(prom(['prometheus', 'node']))
+      .mockResolvedValueOnce(prom({ headStats: { numSeries: 42 }, seriesCountByMetricName: [] }))
+    const client = new MonitoringClient({ fetchImpl })
+
+    expect((await client.listAlerts()).items[0]).toMatchObject({
+      state: 'firing',
+      labelsJson: expect.stringContaining('HighCPU'),
+    })
+    expect((await client.listRules()).items[0]).toMatchObject({ name: 'job:up:sum', activeAlertCount: 0 })
+    expect((await client.listLabels()).items).toEqual(['__name__', 'job'])
+    expect((await client.getLabelValues('job')).items).toEqual(['prometheus', 'node'])
+    expect((await client.getTsdbStatus()).headSeriesCount).toBe(42)
+  })
+
+  it('gates and executes Prometheus series deletion', async () => {
+    const fetchImpl = vi.fn()
+    const gated = new MonitoringClient({ fetchImpl })
+    expect(await gated.deleteSeries(['up{job="node"}'])).toMatchObject({ ok: false })
+    expect(fetchImpl).not.toHaveBeenCalled()
+
+    fetchImpl.mockResolvedValueOnce(prom(null))
+    const allowed = new MonitoringClient({ allowWrite: true, fetchImpl })
+    expect(await allowed.deleteSeries(['up{job="node"}'], { start: '1', end: '2' })).toEqual({ ok: true })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://localhost:9090/api/v1/admin/tsdb/delete_series?match[]=up%7Bjob%3D%22node%22%7D&start=1&end=2',
+    )
+    expect(requestInit(fetchImpl).method).toBe('POST')
+  })
+
+  it('maps Alertmanager status, alerts, groups, silences, and receivers', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am({ versionInfo: { version: '0.27.0' }, uptime: '2026-08-28T00:00:00Z' }))
+      .mockResolvedValueOnce(am([{
+        fingerprint: 'abc',
+        startsAt: '2026-08-28T00:00:00Z',
+        endsAt: '0001-01-01T00:00:00Z',
+        status: { state: 'active', silencedBy: [], inhibitedBy: [] },
+        labels: { alertname: 'HighCPU' },
+        annotations: { summary: 'CPU high' },
+        receivers: [{ name: 'webhook' }],
+      }]))
+      .mockResolvedValueOnce(am([{ receiver: 'webhook', labels: { alertname: 'HighCPU' }, alerts: [{}] }]))
+      .mockResolvedValueOnce(am([{
+        id: 'sil-1',
+        createdBy: 'bot',
+        comment: 'maintenance',
+        startsAt: '2026-08-28T00:00:00Z',
+        endsAt: '2026-08-28T01:00:00Z',
+        matchers: [{ name: 'host', value: 'db-1' }],
+        status: { state: 'active' },
+      }]))
+      .mockResolvedValueOnce(am([{ name: 'webhook' }, { name: 'email' }]))
+    const client = new MonitoringClient({ alertmanagerBaseUrl: 'http://am:9093', fetchImpl })
+
+    expect((await client.getAlertmanagerStatus()).version).toBe('0.27.0')
+    const alerts = await client.listAlertmanagerAlerts({ filter: 'alertname="HighCPU"', receiver: 'webhook' })
+    expect(alerts.items[0]).toMatchObject({
+      fingerprint: 'abc',
+      labelsJson: expect.stringContaining('HighCPU'),
+    })
+    expect(fetchImpl.mock.calls[1][0]).toContain('filter=alertname%3D%22HighCPU%22')
+    expect((await client.listAlertGroups({ receiver: 'webhook' })).items[0].alertCount).toBe(1)
+    expect((await client.listSilences()).items[0].id).toBe('sil-1')
+    expect((await client.listReceivers()).items.map(item => item.name)).toEqual(['webhook', 'email'])
+  })
+
+  it('gates and executes Alertmanager silence and alert write operations', async () => {
+    const fetchImpl = vi.fn()
+    const gated = new MonitoringClient({ fetchImpl })
+    expect(await gated.createSilence({
+      matchers: [{ name: 'severity', value: 'critical' }],
+      startsAt: '2026-08-28T00:00:00Z',
+      endsAt: '2026-08-28T01:00:00Z',
+      createdBy: 'bot',
+      comment: 'maintenance',
+    })).toMatchObject({ ok: false })
+    expect(await gated.deleteSilence('sil-1')).toMatchObject({ ok: false })
+    expect(await gated.sendAlerts([{ labels: { alertname: 'X' } }])).toMatchObject({ ok: false })
+    expect(fetchImpl).not.toHaveBeenCalled()
+
+    fetchImpl
+      .mockResolvedValueOnce(am({ silenceID: 'sil-new' }))
+      .mockResolvedValueOnce(am({}))
+      .mockResolvedValueOnce(am({ status: 'success' }))
+    const allowed = new MonitoringClient({
+      alertmanagerBaseUrl: 'http://am:9093',
+      allowWrite: true,
+      fetchImpl,
+    })
+    expect(await allowed.createSilence({
+      matchers: [{ name: 'severity', value: 'critical' }],
+      startsAt: '2026-08-28T00:00:00Z',
+      endsAt: '2026-08-28T01:00:00Z',
+      createdBy: 'bot',
+      comment: 'maintenance',
+    })).toEqual({ ok: true, id: 'sil-new' })
+    expect(JSON.parse(String(requestInit(fetchImpl, 0).body))).toMatchObject({
+      createdBy: 'bot',
+      comment: 'maintenance',
+    })
+    expect(await allowed.deleteSilence('sil-1')).toEqual({ ok: true })
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://am:9093/api/v2/silence/sil-1')
+    expect(requestInit(fetchImpl, 1).method).toBe('DELETE')
+    expect(await allowed.sendAlerts([{ labels: { alertname: 'X' } }])).toEqual({ ok: true })
+    expect(JSON.parse(String(requestInit(fetchImpl, 2).body)).alerts).toHaveLength(1)
+  })
+
+  it('throws infrastructure errors and keeps HTTP 400 validation errors as write business values', async () => {
+    const fetchImpl = vi.fn(async () => json({ message: 'invalid token' }, 401))
+    const client = new MonitoringClient({ fetchImpl })
+    await expect(client.query('up')).rejects.toThrow(MonitoringError)
+
+    fetchImpl.mockResolvedValueOnce(json({ message: 'bad silence matcher' }, 400))
+    const allowed = new MonitoringClient({ allowWrite: true, fetchImpl })
+    expect(await allowed.createSilence({
+      matchers: [],
+      startsAt: 'x',
+      endsAt: 'y',
+      createdBy: 'bot',
+      comment: 'c',
+    })).toMatchObject({ ok: false, reason: 'bad silence matcher' })
+  })
+})

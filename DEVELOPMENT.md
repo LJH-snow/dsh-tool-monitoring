@@ -1,0 +1,85 @@
+# dsh-tool-monitoring 开发文档
+
+## 1. 项目概览
+
+| 项 | 内容 |
+|---|---|
+| 项目名 | `dsh-tool-monitoring` |
+| 定位 | DeepSeek Harness 的 Prometheus + Alertmanager 可观测性插件 |
+| 版本 | v0.1.0 |
+| 架构 | Cordis 插件 + `ctx.tools.register(defineTool(...))` |
+| API | Prometheus HTTP API v1、Alertmanager HTTP API v2 |
+| 认证 | Bearer Token 或 HTTP Basic Auth |
+
+### 1.1 目录
+
+```text
+src/client.ts      MonitoringClient：fetch 注入、超时、认证、错误映射、写开关
+src/index.ts       18 个 defineTool 定义与插件 apply
+tests/client.spec.ts  客户端契约测试
+tests/tools.spec.ts   工具注册、写保护、JSON 参数、业务失败值、UI 呈现测试
+examples/cordis.yml   dsh 组合配置示例
+.github/workflows/ci.yml  Node 22/24 CI
+```
+
+## 2. 技术决策
+
+### 2.1 范围控制
+
+第一版聚焦 Prometheus + Alertmanager 的「可观测性闭环」：PromQL 查询、范围查询、target/alert/rule/series/label/TSDB 巡检，以及 Alertmanager 告警、分组、静默、接收人操作，共 18 个工具。
+
+Grafana 面板与数据源、Loki 日志查询、PagerDuty 通知链路推迟到后续版本，避免一个插件同时承担过多 API 契约和认证模型。
+
+### 2.2 安全与写保护
+
+- 默认端点：Prometheus `http://localhost:9090`，Alertmanager `http://localhost:9093`；base URL 自动去掉尾部斜杠，配置为空字符串时禁用对应组件。
+- Token 会透传为 `Authorization: Bearer <token>`；如果值已以 `Bearer ` 开头则原样使用。
+- 未配置 Token 时支持 Basic Auth；两个组件分别有独立的用户名/密码配置。
+- 写工具默认关闭。`allowWrite: false` 时，即使在执行前传入合法参数，也返回 `{ ok: false, reason }` 且不发请求。
+- `allowWrite: true` 只开启删除 series、创建/删除 silence、发送 alert 三组写工具，不改变读取能力。
+
+### 2.3 错误映射
+
+| 场景 | 返回/行为 |
+|---|---|
+| 组件未配置（读） | `{ connected: false, reason }` |
+| 写操作未开启 | `{ ok: false, reason }` |
+| Prometheus API 返回 `status: error` | 抛 `MonitoringError` |
+| 写操作 HTTP 400 校验失败 | `{ ok: false, reason }` |
+| 401/403/429/5xx | 抛 `MonitoringError` |
+
+基础设施错误直接抛出，方便宿主按权限/限流/服务不可用处理；业务校验错误转成稳定返回值，避免模型把配置问题误判为工具故障。
+
+### 2.4 API 细节
+
+- 即时查询：`GET /api/v1/query?query=...&time=...`。
+- 范围查询：`GET /api/v1/query_range?query=...&start=...&end=...&step=...`。
+- Prometheus 巡检：`/api/v1/targets`、`/api/v1/alerts`、`/api/v1/rules`、`/api/v1/series`、`/api/v1/labels`、`/api/v1/label/{name}/values`、`/api/v1/status/tsdb`。
+- 删除序列：`POST /api/v1/admin/tsdb/delete_series`，生产环境需要配置 admin API 权限。
+- Alertmanager：`/api/v2/status`、`/api/v2/alerts`、`/api/v2/alerts/groups`、`/api/v2/silences`、`/api/v2/receivers`。
+- 写操作参数使用 JSON 字符串传递：`matchersJson`、`alertsJson`。工具执行前会校验 JSON 数组和必填对象字段。
+- 所有请求合并 `exec.signal` 与 `AbortSignal.timeout`，默认超时 15 秒，`timeoutMs: 0` 可关闭超时。
+
+## 3. 测试
+
+```sh
+npm install
+npm run typecheck
+npm test
+npm run build
+```
+
+当前测试覆盖：
+
+- Prometheus 查询 URL、Bearer 认证、查询结果映射、系列删除写保护与请求体。
+- Alertmanager 状态、告警、分组、静默、接收人映射，以及静默/告警写操作。
+- 18 个工具注册、组件未配置保护、JSON 参数校验、render 纯函数与 present 卡片。
+
+## 4. 后续方向
+
+- Grafana：面板查询、告警规则、数据源状态。
+- Loki：LogQL 查询与日志上下文。
+- PagerDuty/Webhook：从 Alertmanager receiver 延伸到通知编排。
+- 复杂告警操作：批量静默、模板化注释、Prometheus rule 热更新（需先确认服务端权限模型）。
+
+开发新能力时继续复用 `MonitoringClient` 的统一认证、超时和错误映射，避免不同组件返回结构分裂。

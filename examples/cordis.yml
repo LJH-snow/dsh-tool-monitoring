@@ -1,0 +1,17 @@
+# dsh-tool-monitoring 组合示例
+# 用法:在 dsh 的组合配置中引入本插件(示例片段,按你的部署组合调整)
+- name: 'github:LJH-snow/dsh-tool-monitoring'
+  config:
+    # Prometheus 默认 http://localhost:9090
+    # prometheusBaseUrl: 'http://prometheus:9090'
+    # prometheusToken: 'Bearer token or plain token'
+    # prometheusUsername: ''
+    # prometheusPassword: ''
+    # Alertmanager 默认 http://localhost:9093
+    # alertmanagerBaseUrl: 'http://alertmanager:9093'
+    # alertmanagerToken: ''
+    # alertmanagerUsername: ''
+    # alertmanagerPassword: ''
+    # 写操作默认关闭;确认权限后再开启
+    allowWrite: true
+    timeoutMs: 15000
