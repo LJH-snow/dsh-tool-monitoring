@@ -7,13 +7,16 @@ import {
   type AlertmanagerAlertItem,
   type AlertmanagerGroupItem,
   type AlertmanagerSilenceItem,
+  type GrafanaAlertRuleItem,
   type GrafanaAlertInstanceItem,
   type GrafanaAnnotationItem,
+  type GrafanaContactPointItem,
   type GrafanaDashboardData,
   type GrafanaDashboardSummaryItem,
   type GrafanaDatasourceItem,
   type GrafanaFolderItem,
   type GrafanaHealthData,
+  type GrafanaNotificationPolicyData,
   type LokiDetectedFieldItem,
   type LokiAlertItem,
   type LokiIndexStats,
@@ -1685,6 +1688,138 @@ export function createTools(client: MonitoringClient) {
         })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_alert_rules',
+      description: 'List Grafana-managed alert rules with folder, rule group, condition, state settings, and labels.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaAlertRuleItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAlertRules(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana alert rules', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} alert rule(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListAlertRules({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_alert_rule',
+      description: 'Get one Grafana alert rule by UID with condition, data query JSON, labels, and annotations.',
+      parameters: {
+        uid: { type: 'string', required: true, description: 'Grafana alert rule UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaAlertRuleItemSchema,
+          },
+        },
+        render: (_args, value) => renderGrafanaAlertRule(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana alert rule ${args.uid}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { title?: string } }
+        return { card: 'generic', title: v.connected ? `Alert rule ${v.item?.title ?? ''}` : 'Grafana unavailable' }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetAlertRule(args.uid as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_contact_points',
+      description: 'List Grafana contact points with type, safe settings metadata, and resolve message behavior.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaContactPointItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaContactPoints(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana contact points', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} contact point(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListContactPoints({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_notification_policy',
+      description: 'Get the current Grafana notification policy tree with receiver, grouping, and routing intervals.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            receiver: { type: 'string' },
+            groupByJson: { type: 'string' },
+            groupWait: { type: 'string' },
+            groupInterval: { type: 'string' },
+            repeatInterval: { type: 'string' },
+            policyJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderGrafanaNotificationPolicy(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana notification policy', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; receiver?: string }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: v.receiver ? `Policy receiver ${v.receiver}` : 'Notification policy' }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetNotificationPolicy({ signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -1812,6 +1947,44 @@ const grafanaAlertInstanceItemSchema = {
     labelsJson: { type: 'string' },
     annotationsJson: { type: 'string' },
     receiversJson: { type: 'string' },
+  },
+} as const
+
+const grafanaAlertRuleItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    uid: { type: 'string' },
+    title: { type: 'string' },
+    folderUid: { type: 'string' },
+    namespaceUid: { type: 'string' },
+    dashboardUid: { type: 'string' },
+    panelId: { type: 'number' },
+    ruleGroup: { type: 'string' },
+    condition: { type: 'string' },
+    dataJson: { type: 'string' },
+    noDataState: { type: 'string' },
+    execErrState: { type: 'string' },
+    duration: { type: 'string' },
+    intervalSeconds: { type: 'number' },
+    paused: { type: 'boolean' },
+    updated: { type: 'string' },
+    version: { type: 'number' },
+    labelsJson: { type: 'string' },
+    annotationsJson: { type: 'string' },
+    ruleJson: { type: 'string' },
+  },
+} as const
+
+const grafanaContactPointItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    uid: { type: 'string' },
+    name: { type: 'string' },
+    type: { type: 'string' },
+    settingsJson: { type: 'string' },
+    disableResolveMessage: { type: 'boolean' },
   },
 } as const
 
@@ -2087,4 +2260,30 @@ function renderGrafanaAlertInstances(items: Array<Partial<GrafanaAlertInstanceIt
   return text(items.map(alert =>
     `${alert.labelsJson ?? '{}'} status=${alert.statusJson ?? '{}'} receiver=${alert.receiversJson ?? '[]'}`,
   ).join('\n'))
+}
+
+function renderGrafanaAlertRules(items: Array<Partial<GrafanaAlertRuleItem>>) {
+  if (!items.length) return text('No Grafana alert rules found.')
+  return text(items.map(rule =>
+    `${rule.uid ?? ''} ${rule.title ?? ''} folder=${rule.folderUid ?? ''} group=${rule.ruleGroup ?? ''} condition=${rule.condition ?? ''} ${rule.paused ? 'paused' : 'active'}`,
+  ).join('\n'))
+}
+
+function renderGrafanaAlertRule(value: { connected?: boolean; reason?: string; item?: Partial<GrafanaAlertRuleItem> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  const item = value.item
+  if (!item?.uid && !item?.title) return text('No Grafana alert rule found.')
+  return text(`${item.title ?? ''} (${item.uid ?? ''})\nfolder: ${item.folderUid ?? ''}\ngroup: ${item.ruleGroup ?? ''}\nfor: ${item.duration ?? ''}\n${item.ruleJson ?? ''}`)
+}
+
+function renderGrafanaContactPoints(items: Array<Partial<GrafanaContactPointItem>>) {
+  if (!items.length) return text('No Grafana contact points found.')
+  return text(items.map(point =>
+    `${point.name ?? ''} (${point.type ?? 'unknown'}) resolveMessage=${point.disableResolveMessage ? 'disabled' : 'enabled'}`,
+  ).join('\n'))
+}
+
+function renderGrafanaNotificationPolicy(value: Partial<GrafanaNotificationPolicyData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  return text(`receiver: ${value.receiver ?? ''}\ngroupBy: ${value.groupByJson ?? '[]'}\ngroupWait: ${value.groupWait ?? ''}\ngroupInterval: ${value.groupInterval ?? ''}\nrepeatInterval: ${value.repeatInterval ?? ''}\n${value.policyJson ?? ''}`)
 }

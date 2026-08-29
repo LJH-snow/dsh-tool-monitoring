@@ -444,6 +444,112 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[5][0]).toBe('http://grafana:3000/api/folders')
   })
 
+  it('maps Grafana alert rules, contact points, and notification policy', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am([{
+        uid: 'rule-1',
+        title: 'High CPU',
+        folderUID: 'folder-1',
+        namespaceUID: 'ns-1',
+        dashboardUID: 'dash-1',
+        panelID: 2,
+        ruleGroup: 'critical',
+        condition: 'C',
+        data: [{ refId: 'C', datasourceUid: 'ds-1' }],
+        noDataState: 'NoData',
+        execErrState: 'Error',
+        for: '5m',
+        intervalSeconds: 60,
+        paused: false,
+        updated: '2026-08-30T00:00:00Z',
+        version: 2,
+        labels: { severity: 'critical' },
+        annotations: { summary: 'CPU high' },
+      }]))
+      .mockResolvedValueOnce(am({
+        uid: 'rule-1',
+        title: 'High CPU',
+        folderUID: 'folder-1',
+        ruleGroup: 'critical',
+        condition: 'C',
+        data: [{ refId: 'C' }],
+        noDataState: 'NoData',
+        execErrState: 'Error',
+        for: '5m',
+        intervalSeconds: 60,
+        paused: true,
+        updated: '2026-08-30T00:00:00Z',
+        version: 3,
+        labels: { severity: 'critical' },
+        annotations: { summary: 'CPU high' },
+      }))
+      .mockResolvedValueOnce(am([{
+        uid: 'cp-1',
+        name: 'ops-webhook',
+        type: 'webhook',
+        settings: { url: 'https://example.com/hook' },
+        disableResolveMessage: false,
+      }]))
+      .mockResolvedValueOnce(am({
+        receiver: 'ops-webhook',
+        group_by: ['alertname'],
+        group_wait: '30s',
+        group_interval: '5m',
+        repeat_interval: '4h',
+        routes: [],
+      }))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect((await client.grafanaListAlertRules()).items[0]).toMatchObject({
+      uid: 'rule-1',
+      title: 'High CPU',
+      folderUid: 'folder-1',
+      namespaceUid: 'ns-1',
+      dashboardUid: 'dash-1',
+      panelId: 2,
+      ruleGroup: 'critical',
+      condition: 'C',
+      duration: '5m',
+      intervalSeconds: 60,
+      version: 2,
+      dataJson: expect.stringContaining('ds-1'),
+      labelsJson: expect.stringContaining('critical'),
+    })
+    expect(await client.grafanaGetAlertRule('rule-1')).toMatchObject({
+      connected: true,
+      item: {
+        uid: 'rule-1',
+        paused: true,
+        version: 3,
+        ruleJson: expect.stringContaining('High CPU'),
+      },
+    })
+    expect((await client.grafanaListContactPoints()).items[0]).toMatchObject({
+      uid: 'cp-1',
+      name: 'ops-webhook',
+      type: 'webhook',
+      settingsJson: expect.stringContaining('example.com'),
+    })
+    expect(await client.grafanaGetNotificationPolicy()).toMatchObject({
+      connected: true,
+      receiver: 'ops-webhook',
+      groupByJson: expect.stringContaining('alertname'),
+      groupWait: '30s',
+      groupInterval: '5m',
+      repeatInterval: '4h',
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://grafana:3000/api/v1/provisioning/alert-rules')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/v1/provisioning/alert-rules/rule-1')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/v1/provisioning/contact-points')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/v1/provisioning/policies')
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({

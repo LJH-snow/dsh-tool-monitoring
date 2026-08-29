@@ -6,7 +6,7 @@
 |---|---|
 | 项目名 | `dsh-tool-monitoring` |
 | 定位 | DeepSeek Harness 的 Prometheus + Loki + Alertmanager + Grafana 可观测性插件 |
-| 版本 | v0.5.0 |
+| 版本 | v0.6.0 |
 | 架构 | Cordis 插件 + `ctx.tools.register(defineTool(...))` |
 | API | Prometheus HTTP API v1、Loki HTTP API v1、Alertmanager HTTP API v2、Grafana HTTP API |
 | 认证 | Bearer Token 或 HTTP Basic Auth |
@@ -15,7 +15,7 @@
 
 ```text
 src/client.ts      MonitoringClient：fetch 注入、超时、认证、错误映射、写开关
-src/index.ts       41 个 defineTool 定义与插件 apply
+src/index.ts       45 个 defineTool 定义与插件 apply
 tests/client.spec.ts  客户端契约测试
 tests/tools.spec.ts   工具注册、写保护、JSON 参数、业务失败值、UI 呈现测试
 examples/cordis.yml   dsh 组合配置示例
@@ -35,6 +35,8 @@ v0.3 继续补 Loki 只读能力：ruler rule groups、Prometheus 兼容 rules/a
 v0.4 增加 Grafana 只读巡检：health、datasources、dashboard 搜索/详情、folders，共 6 个工具，插件总数推进到 37 个。Grafana 工具只读取安全连接字段与 dashboard JSON，不暴露 secureJsonData 或写操作。
 
 v0.5 增加可观测性巡检的互补能力：Loki detected fields/values 帮助快速了解日志结构，Grafana annotations 与 alert instances 帮助核对事件与当前告警状态，共 4 个只读工具，插件总数推进到 41 个。
+
+v0.6 增加 Grafana 告警配置只读链路：alert rules 列表/详情、contact points、notification policy，共 4 个工具，插件总数推进到 45 个。使用 provisioning API，只读取查询定义、labels、annotations 与安全 settings 元数据，不暴露 secureJsonData 或写操作。
 
 ### 2.2 安全与写保护
 
@@ -69,7 +71,7 @@ v0.5 增加可观测性巡检的互补能力：Loki detected fields/values 帮�
 - Loki 规则与告警：`/loki/api/v1/rules`（YAML）、`/prometheus/api/v1/rules`、`/prometheus/api/v1/alerts`。
 - Loki volume 与 patterns：`/loki/api/v1/index/volume`、`/loki/api/v1/index/volume_range`、`/loki/api/v1/patterns`。
 - Loki detected fields：`/loki/api/v1/detected_fields`、`/loki/api/v1/detected_field/{name}/values`。
-- Grafana：`/api/health`、`/api/datasources`、`/api/datasources/uid/{uid}`、`/api/search`、`/api/dashboards/uid/{uid}`、`/api/folders`、`/api/annotations`、`/api/alertmanager/grafana/api/v2/alerts`。
+- Grafana：`/api/health`、`/api/datasources`、`/api/datasources/uid/{uid}`、`/api/search`、`/api/dashboards/uid/{uid}`、`/api/folders`、`/api/annotations`、`/api/alertmanager/grafana/api/v2/alerts`、`/api/v1/provisioning/alert-rules`、`/api/v1/provisioning/alert-rules/{uid}`、`/api/v1/provisioning/contact-points`、`/api/v1/provisioning/policies`。
 - Alertmanager：`/api/v2/status`、`/api/v2/alerts`、`/api/v2/alerts/groups`、`/api/v2/silences`、`/api/v2/receivers`。
 - 写操作参数使用 JSON 字符串传递：`matchersJson`、`alertsJson`；Loki series selector 使用 `matchesJson`，Grafana annotation tags 使用 `tagsJson`。工具执行前会校验 JSON 数组和必填对象字段。
 - 所有请求合并 `exec.signal` 与 `AbortSignal.timeout`，默认超时 15 秒，`timeoutMs: 0` 可关闭超时。
@@ -88,13 +90,13 @@ npm run build
 - Prometheus 查询 URL、Bearer 认证、查询结果映射、系列删除写保护与请求体。
 - Loki 范围查询、租户头、labels/values/series/index stats/buildinfo 映射，以及 rule groups/rules/alerts/index volume/volume_range/patterns 映射。
 - Loki detected fields/values 映射。
-- Grafana health、datasources、dashboard 搜索/详情、folders、annotations、alert instances 映射与 Bearer 认证。
+- Grafana health、datasources、dashboard 搜索/详情、folders、annotations、alert rules、alert instances、contact points、notification policy 映射与 Bearer 认证。
 - Alertmanager 状态、告警、分组、静默、接收人映射，以及静默/告警写操作。
-- 41 个工具注册、组件未配置保护、JSON 参数校验、render 纯函数与 present 卡片；当前测试 25 项通过。
+- 45 个工具注册、组件未配置保护、JSON 参数校验、render 纯函数与 present 卡片；当前测试 27 项通过。
 
 ## 4. 后续方向
 
-- Grafana：告警规则、团队权限等更深只读巡检。
+- Grafana：团队权限、组织成员等更深只读巡检。
 - Loki：日志上下文、tail 流式观察。
 - PagerDuty/Webhook：从 Alertmanager receiver 延伸到通知编排。
 - 复杂告警操作：批量静默、模板化注释、Prometheus rule 热更新（需先确认服务端权限模型）。

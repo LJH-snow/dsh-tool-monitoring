@@ -250,6 +250,46 @@ export interface GrafanaAlertInstanceItem {
   receiversJson: string
 }
 
+export interface GrafanaAlertRuleItem {
+  uid: string
+  title: string
+  folderUid: string
+  namespaceUid: string
+  dashboardUid: string
+  panelId: number
+  ruleGroup: string
+  condition: string
+  dataJson: string
+  noDataState: string
+  execErrState: string
+  duration: string
+  intervalSeconds: number
+  paused: boolean
+  updated: string
+  version: number
+  labelsJson: string
+  annotationsJson: string
+  ruleJson: string
+}
+
+export interface GrafanaContactPointItem {
+  uid: string
+  name: string
+  type: string
+  settingsJson: string
+  disableResolveMessage: boolean
+}
+
+export interface GrafanaNotificationPolicyData {
+  connected: boolean
+  receiver: string
+  groupByJson: string
+  groupWait: string
+  groupInterval: string
+  repeatInterval: string
+  policyJson: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -515,6 +555,55 @@ function mapGrafanaAlertInstance(data: unknown): GrafanaAlertInstanceItem {
     labelsJson: toJson(record.labels),
     annotationsJson: toJson(record.annotations),
     receiversJson: toJson(record.receivers),
+  }
+}
+
+function mapGrafanaAlertRule(data: unknown): GrafanaAlertRuleItem {
+  const record = asRecord(data)
+  return {
+    uid: asString(record, 'uid'),
+    title: asString(record, 'title'),
+    folderUid: asString(record, 'folderUID') || asString(record, 'folderUid'),
+    namespaceUid: asString(record, 'namespaceUID') || asString(record, 'namespaceUid'),
+    dashboardUid: asString(record, 'dashboardUID') || asString(record, 'dashboardUid'),
+    panelId: asNumber(record, 'panelID') || asNumber(record, 'panelId'),
+    ruleGroup: asString(record, 'ruleGroup') || asString(record, 'rule_group'),
+    condition: asString(record, 'condition'),
+    dataJson: toJson(record.data),
+    noDataState: asString(record, 'noDataState') || asString(record, 'no_data_state'),
+    execErrState: asString(record, 'execErrState') || asString(record, 'exec_err_state'),
+    duration: asString(record, 'for') || asString(record, 'duration') || asString(record, 'forDuration'),
+    intervalSeconds: asNumber(record, 'intervalSeconds') || asNumber(record, 'interval_seconds'),
+    paused: asBoolean(record, 'paused'),
+    updated: asString(record, 'updated'),
+    version: asNumber(record, 'version'),
+    labelsJson: toJson(record.labels),
+    annotationsJson: toJson(record.annotations),
+    ruleJson: JSON.stringify(data ?? {}),
+  }
+}
+
+function mapGrafanaContactPoint(data: unknown): GrafanaContactPointItem {
+  const record = asRecord(data)
+  return {
+    uid: asString(record, 'uid'),
+    name: asString(record, 'name'),
+    type: asString(record, 'type'),
+    settingsJson: toJson(record.settings),
+    disableResolveMessage: asBoolean(record, 'disableResolveMessage'),
+  }
+}
+
+function mapGrafanaNotificationPolicy(data: unknown): GrafanaNotificationPolicyData {
+  const record = asRecord(data)
+  return {
+    connected: true,
+    receiver: asString(record, 'receiver'),
+    groupByJson: toJson(record.group_by),
+    groupWait: asString(record, 'group_wait'),
+    groupInterval: asString(record, 'group_interval'),
+    repeatInterval: asString(record, 'repeat_interval'),
+    policyJson: JSON.stringify(data ?? {}),
   }
 }
 
@@ -1388,6 +1477,56 @@ export class MonitoringClient {
     )
     const items = asArray(data).map(mapGrafanaAlertInstance)
     return { connected: true, items }
+  }
+
+  async grafanaListAlertRules(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaAlertRuleItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/v1/provisioning/alert-rules',
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaAlertRule)
+    return { connected: true, items }
+  }
+
+  async grafanaGetAlertRule(
+    uid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    item: GrafanaAlertRuleItem
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/v1/provisioning/alert-rules/${encodeURIComponent(uid)}`,
+      options.signal,
+    )
+    return { connected: true, item: mapGrafanaAlertRule(data) }
+  }
+
+  async grafanaListContactPoints(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaContactPointItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/v1/provisioning/contact-points',
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaContactPoint)
+    return { connected: true, items }
+  }
+
+  async grafanaGetNotificationPolicy(options: { signal?: AbortSignal } = {}): Promise<GrafanaNotificationPolicyData> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/v1/provisioning/policies',
+      options.signal,
+    )
+    return mapGrafanaNotificationPolicy(data)
   }
 
   async deleteSeries(
