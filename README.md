@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series and index statistics, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume and detected patterns, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -74,6 +74,12 @@ Loki tools:
 | `loki_list_series` | Find streams matching LogQL selectors | no |
 | `loki_get_index_stats` | Read index statistics for streams, chunks, entries and bytes | no |
 | `loki_get_status` | Read Loki build information | no |
+| `loki_list_rule_groups` | List ruler rule groups for the tenant as YAML | no |
+| `loki_list_rules` | List alerting and recording rules exposed by Loki | no |
+| `loki_list_alerts` | List active Loki alerting rules | no |
+| `loki_get_index_volume` | Get index volume for labels or series | no |
+| `loki_get_index_volume_range` | Get index volume as a matrix over a range | no |
+| `loki_get_patterns` | Get patterns detected in Loki logs | no |
 
 Alertmanager tools:
 

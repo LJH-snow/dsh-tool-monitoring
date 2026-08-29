@@ -7,10 +7,14 @@ import {
   type AlertmanagerAlertItem,
   type AlertmanagerGroupItem,
   type AlertmanagerSilenceItem,
+  type LokiAlertItem,
   type LokiIndexStats,
+  type LokiPatternItem,
   type LokiQueryData,
+  type LokiRuleItem,
   type LokiSeriesItem,
   type LokiStatusData,
+  type LokiVolumeData,
   type PrometheusAlertItem,
   type PrometheusRuleItem,
   type PrometheusTargetItem,
@@ -1011,6 +1015,254 @@ export function createTools(client: MonitoringClient) {
         return client.lokiGetStatus({ signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'loki_list_rule_groups',
+      description: 'List Loki ruler rule groups configured for the authenticated tenant as YAML.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            ruleGroupsYaml: { type: 'string' },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Loki is not configured.')
+          return text(value.ruleGroupsYaml || 'No Loki rule groups found.')
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Loki rule groups', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean }
+        return { card: 'generic', title: v.connected ? 'Loki rule groups' : 'Loki unavailable' }
+      },
+      async execute(_args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiListRuleGroups({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'loki_list_rules',
+      description: 'List Loki alerting and recording rules exposed by the Prometheus-compatible rules endpoint.',
+      parameters: {
+        type: { type: 'string', enum: ['alert', 'record'], description: 'Optional rule type filter' },
+        file: { type: 'string', description: 'Optional file/group file filter' },
+        ruleGroup: { type: 'string', description: 'Optional rule group name filter' },
+        ruleName: { type: 'string', description: 'Optional rule name filter' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: lokiRuleItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Loki is not configured.')
+          return renderLokiRules(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Loki rules ${args.type ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Loki unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} rule(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiListRules({
+          type: args.type,
+          file: args.file,
+          ruleGroup: args.ruleGroup,
+          ruleName: args.ruleName,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'loki_list_alerts',
+      description: 'List active Loki alerting rules from the Prometheus-compatible alerts endpoint.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: prometheusAlertItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Loki is not configured.')
+          return renderLokiAlerts(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Loki alerts', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Loki unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} alert(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiListAlerts({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'loki_get_index_volume',
+      description: 'Get Loki index volume for label or series aggregation over a time range.',
+      parameters: {
+        query: { type: 'string', required: true, description: 'LogQL stream selector, for example {job="app"}' },
+        start: { type: 'string', required: true, description: 'Start time as Unix nanoseconds or RFC 3339' },
+        end: { type: 'string', required: true, description: 'End time as Unix nanoseconds or RFC 3339' },
+        limit: { type: 'integer', description: 'Maximum series to return, default 100' },
+        targetLabels: { type: 'string', description: 'Comma-separated labels to aggregate into' },
+        aggregateBy: { type: 'string', enum: ['series', 'labels'], description: 'Aggregate into series or labels, default series' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            resultType: { type: 'string' },
+            seriesCount: { type: 'number' },
+            totalBytes: { type: 'number' },
+            resultJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderLokiVolume(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Loki volume ${args.query}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; seriesCount?: number; totalBytes?: number }
+        if (!v.connected) return { card: 'generic', title: 'Loki unavailable' }
+        return { card: 'generic', title: `${v.seriesCount ?? 0} series, ${v.totalBytes ?? 0} bytes` }
+      },
+      async execute(args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiGetIndexVolume(args.query as string, {
+          start: args.start as string,
+          end: args.end as string,
+          limit: args.limit,
+          targetLabels: args.targetLabels,
+          aggregateBy: args.aggregateBy,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'loki_get_index_volume_range',
+      description: 'Get Loki index volume as a Prometheus-style matrix over a time range.',
+      parameters: {
+        query: { type: 'string', required: true, description: 'LogQL stream selector, for example {job="app"}' },
+        start: { type: 'string', required: true, description: 'Start time as Unix nanoseconds or RFC 3339' },
+        end: { type: 'string', required: true, description: 'End time as Unix nanoseconds or RFC 3339' },
+        step: { type: 'string', description: 'Resolution step, for example 5m or 300' },
+        limit: { type: 'integer', description: 'Maximum series to return, default 100' },
+        targetLabels: { type: 'string', description: 'Comma-separated labels to aggregate into' },
+        aggregateBy: { type: 'string', enum: ['series', 'labels'], description: 'Aggregate into series or labels, default series' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            resultType: { type: 'string' },
+            seriesCount: { type: 'number' },
+            totalBytes: { type: 'number' },
+            resultJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderLokiVolume(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Loki volume range ${args.query}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; seriesCount?: number; totalBytes?: number }
+        if (!v.connected) return { card: 'generic', title: 'Loki unavailable' }
+        return { card: 'generic', title: `${v.seriesCount ?? 0} series, ${v.totalBytes ?? 0} bytes` }
+      },
+      async execute(args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiGetIndexVolumeRange(args.query as string, {
+          start: args.start as string,
+          end: args.end as string,
+          step: args.step,
+          limit: args.limit,
+          targetLabels: args.targetLabels,
+          aggregateBy: args.aggregateBy,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'loki_get_patterns',
+      description: 'Get pattern detection results for Loki log streams over a time range.',
+      parameters: {
+        query: { type: 'string', required: true, description: 'LogQL stream selector, for example {job="app"}' },
+        start: { type: 'string', required: true, description: 'Start time as Unix nanoseconds or RFC 3339' },
+        end: { type: 'string', required: true, description: 'End time as Unix nanoseconds or RFC 3339' },
+        step: { type: 'string', description: 'Step between pattern samples, for example 10s' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: lokiPatternItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Loki is not configured.')
+          return renderLokiPatterns(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Loki patterns ${args.query}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Loki unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} pattern(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiGetPatterns(args.query as string, {
+          start: args.start as string,
+          end: args.end as string,
+          step: args.step,
+          signal: exec.signal,
+        })
+      },
+    }),
   ]
 }
 
@@ -1019,6 +1271,35 @@ const lokiSeriesItemSchema = {
   additionalProperties: false,
   properties: {
     labelsJson: { type: 'string' },
+  },
+} as const
+
+const lokiRuleItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    group: { type: 'string' },
+    file: { type: 'string' },
+    name: { type: 'string' },
+    type: { type: 'string' },
+    health: { type: 'string' },
+    lastError: { type: 'string' },
+    query: { type: 'string' },
+    duration: { type: 'string' },
+    labelsJson: { type: 'string' },
+    annotationsJson: { type: 'string' },
+    activeAlertCount: { type: 'number' },
+  },
+} as const
+
+const lokiPatternItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    pattern: { type: 'string' },
+    sampleCount: { type: 'number' },
+    totalCount: { type: 'number' },
+    samplesJson: { type: 'string' },
   },
 } as const
 
@@ -1212,4 +1493,30 @@ function renderLokiIndexStats(value: Partial<LokiIndexStats> & { reason?: string
 function renderLokiStatus(value: Partial<LokiStatusData> & { reason?: string }) {
   if (!value.connected) return text(value.reason ?? 'Loki is not configured.')
   return text(`version: ${value.version ?? ''}\nrevision: ${value.revision ?? ''}\nbranch: ${value.branch ?? ''}\nbuildDate: ${value.buildDate ?? ''}\ngoVersion: ${value.goVersion ?? ''}\n${value.statusJson ?? ''}`)
+}
+
+function renderLokiRules(items: Array<Partial<LokiRuleItem>>) {
+  if (!items.length) return text('No Loki rules found.')
+  return text(items.map(rule =>
+    `${rule.group ?? ''}/${rule.file ?? ''} ${rule.type ?? 'unknown'} ${rule.name ?? ''} health=${rule.health ?? ''} active=${rule.activeAlertCount ?? 0}`,
+  ).join('\n'))
+}
+
+function renderLokiAlerts(items: Array<Partial<LokiAlertItem>>) {
+  if (!items.length) return text('No Loki alerts found.')
+  return text(items.map(alert =>
+    `${alert.state ?? 'unknown'} ${alert.labelsJson ?? '{}'} ${alert.value ?? ''}`,
+  ).join('\n'))
+}
+
+function renderLokiVolume(value: Partial<LokiVolumeData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Loki is not configured.')
+  return text(`${value.resultType ?? 'unknown'} (${value.seriesCount ?? 0} series, ${value.totalBytes ?? 0} bytes)\n${value.resultJson ?? ''}`)
+}
+
+function renderLokiPatterns(items: Array<Partial<LokiPatternItem>>) {
+  if (!items.length) return text('No Loki patterns found.')
+  return text(items.map(pattern =>
+    `${pattern.pattern ?? ''} samples=${pattern.sampleCount ?? 0} total=${pattern.totalCount ?? 0}`,
+  ).join('\n'))
 }

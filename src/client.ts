@@ -118,6 +118,48 @@ export interface LokiStatusData {
   statusJson: string
 }
 
+export interface LokiRuleGroupData {
+  connected: boolean
+  ruleGroupsYaml: string
+}
+
+export interface LokiRuleItem {
+  group: string
+  file: string
+  name: string
+  type: string
+  health: string
+  lastError: string
+  query: string
+  duration: string
+  labelsJson: string
+  annotationsJson: string
+  activeAlertCount: number
+}
+
+export interface LokiAlertItem {
+  state: string
+  value: string
+  activeAt: string
+  labelsJson: string
+  annotationsJson: string
+}
+
+export interface LokiVolumeData {
+  connected: boolean
+  resultType: string
+  seriesCount: number
+  totalBytes: number
+  resultJson: string
+}
+
+export interface LokiPatternItem {
+  pattern: string
+  sampleCount: number
+  totalCount: number
+  samplesJson: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -205,6 +247,15 @@ function asNumber(record: Record<string, unknown>, key: string): number {
   return typeof value === 'number' ? value : 0
 }
 
+function asNumericValue(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
 function toJson(value: unknown): string {
   return JSON.stringify(value ?? {})
 }
@@ -247,6 +298,46 @@ function mapLokiQueryData(data: unknown): LokiQueryData {
     entryCount,
     resultJson: JSON.stringify(result),
   }
+}
+
+function mapLokiVolumeData(data: unknown): LokiVolumeData {
+  const record = asRecord(data)
+  const result = asArray(record.result)
+  let totalBytes = 0
+  for (const rawItem of result) {
+    const item = asRecord(rawItem)
+    const values = asArray(item.values)
+    const value = asArray(item.value)
+    const samples = values.length > 0 ? values : value.length > 0 ? [value] : []
+    for (const sample of samples) {
+      const tuple = asArray(sample)
+      if (tuple.length >= 2) totalBytes += asNumericValue(tuple[tuple.length - 1])
+    }
+  }
+  return {
+    connected: true,
+    resultType: asString(record, 'resultType'),
+    seriesCount: result.length,
+    totalBytes,
+    resultJson: JSON.stringify(result),
+  }
+}
+
+function mapLokiPatterns(data: unknown): LokiPatternItem[] {
+  return asArray(data).map(rawItem => {
+    const record = asRecord(rawItem)
+    const samples = asArray(record.samples)
+    const totalCount = samples.reduce((sum: number, sample) => {
+      const tuple = asArray(sample)
+      return sum + (tuple.length >= 2 ? asNumericValue(tuple[tuple.length - 1]) : 0)
+    }, 0)
+    return {
+      pattern: asString(record, 'pattern'),
+      sampleCount: samples.length,
+      totalCount,
+      samplesJson: JSON.stringify(samples),
+    }
+  })
 }
 
 function mapTarget(data: unknown): PrometheusTargetItem {
@@ -402,6 +493,28 @@ export class MonitoringClient {
     }
     if (record.status === 'success' && 'data' in record) return record.data
     return payload
+  }
+
+  private async lokiTextRequest(path: string, signal?: AbortSignal): Promise<string> {
+    const headers = this.headers('loki')
+    headers.accept = 'application/yaml, text/yaml, text/plain, application/json, */*;q=0.1'
+    const response = await this.fetchImpl(`${this.loki.baseUrl}${path}`, {
+      method: 'GET',
+      headers,
+      signal: this.combinedSignal(signal),
+    })
+    const raw = await response.text()
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`
+      try {
+        const payload = asRecord(JSON.parse(raw))
+        message = asString(payload, 'message') || asString(payload, 'error') || message
+      } catch {
+        // Keep the HTTP fallback when the response body is not JSON.
+      }
+      throw new MonitoringError(message, response.status)
+    }
+    return raw
   }
 
   async query(
@@ -687,6 +800,161 @@ export class MonitoringClient {
       goVersion: asString(data, 'goVersion'),
       statusJson: JSON.stringify(data ?? {}),
     }
+  }
+
+  async lokiListRuleGroups(options: { signal?: AbortSignal } = {}): Promise<LokiRuleGroupData> {
+    const ruleGroupsYaml = await this.lokiTextRequest('/loki/api/v1/rules', options.signal)
+    return { connected: true, ruleGroupsYaml }
+  }
+
+  async lokiListRules(
+    options: {
+      type?: string
+      file?: string
+      ruleGroup?: string
+      ruleName?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<{
+    connected: boolean
+    items: LokiRuleItem[]
+  }> {
+    const params: string[] = []
+    if (options.type) params.push(`type=${encodeURIComponent(options.type)}`)
+    if (options.file) params.push(`file=${encodeURIComponent(options.file)}`)
+    if (options.ruleGroup) params.push(`rule_group=${encodeURIComponent(options.ruleGroup)}`)
+    if (options.ruleName) params.push(`rule_name=${encodeURIComponent(options.ruleName)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = asRecord(await this.lokiRequest(
+      'GET',
+      `/prometheus/api/v1/rules${suffix}`,
+      undefined,
+      options.signal,
+    ))
+    const items: LokiRuleItem[] = []
+    for (const rawGroup of asArray(data.groups)) {
+      const group = asRecord(rawGroup)
+      for (const rawRule of asArray(group.rules)) {
+        const rule = asRecord(rawRule)
+        items.push({
+          group: asString(group, 'name'),
+          file: asString(group, 'file'),
+          name: asString(rule, 'name'),
+          type: asString(rule, 'type'),
+          health: asString(rule, 'health'),
+          lastError: asString(rule, 'lastError'),
+          query: asString(rule, 'query'),
+          duration: asString(rule, 'duration'),
+          labelsJson: toJson(rule.labels),
+          annotationsJson: toJson(rule.annotations),
+          activeAlertCount: asArray(rule.alerts).length,
+        })
+      }
+    }
+    return { connected: true, items }
+  }
+
+  async lokiListAlerts(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: LokiAlertItem[]
+  }> {
+    const data = asRecord(await this.lokiRequest('GET', '/prometheus/api/v1/alerts', undefined, options.signal))
+    const items = asArray(data.alerts).map(rawAlert => {
+      const alert = asRecord(rawAlert)
+      return {
+        state: asString(alert, 'state'),
+        value: asString(alert, 'value'),
+        activeAt: asString(alert, 'activeAt'),
+        labelsJson: toJson(alert.labels),
+        annotationsJson: toJson(alert.annotations),
+      }
+    })
+    return { connected: true, items }
+  }
+
+  async lokiGetIndexVolume(
+    query: string,
+    options: {
+      start: string
+      end: string
+      limit?: number
+      targetLabels?: string
+      aggregateBy?: string
+      signal?: AbortSignal
+    },
+  ): Promise<LokiVolumeData> {
+    const params = [
+      `query=${encodeURIComponent(query)}`,
+      `start=${encodeURIComponent(options.start)}`,
+      `end=${encodeURIComponent(options.end)}`,
+    ]
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    if (options.targetLabels) params.push(`targetLabels=${encodeURIComponent(options.targetLabels)}`)
+    if (options.aggregateBy) params.push(`aggregateBy=${encodeURIComponent(options.aggregateBy)}`)
+    const data = await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/index/volume?${params.join('&')}`,
+      undefined,
+      options.signal,
+    )
+    return mapLokiVolumeData(data)
+  }
+
+  async lokiGetIndexVolumeRange(
+    query: string,
+    options: {
+      start: string
+      end: string
+      step?: string
+      limit?: number
+      targetLabels?: string
+      aggregateBy?: string
+      signal?: AbortSignal
+    },
+  ): Promise<LokiVolumeData> {
+    const params = [
+      `query=${encodeURIComponent(query)}`,
+      `start=${encodeURIComponent(options.start)}`,
+      `end=${encodeURIComponent(options.end)}`,
+    ]
+    if (options.step) params.push(`step=${encodeURIComponent(options.step)}`)
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    if (options.targetLabels) params.push(`targetLabels=${encodeURIComponent(options.targetLabels)}`)
+    if (options.aggregateBy) params.push(`aggregateBy=${encodeURIComponent(options.aggregateBy)}`)
+    const data = await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/index/volume_range?${params.join('&')}`,
+      undefined,
+      options.signal,
+    )
+    return mapLokiVolumeData(data)
+  }
+
+  async lokiGetPatterns(
+    query: string,
+    options: {
+      start: string
+      end: string
+      step?: string
+      signal?: AbortSignal
+    },
+  ): Promise<{
+    connected: boolean
+    items: LokiPatternItem[]
+  }> {
+    const params = [
+      `query=${encodeURIComponent(query)}`,
+      `start=${encodeURIComponent(options.start)}`,
+      `end=${encodeURIComponent(options.end)}`,
+    ]
+    if (options.step) params.push(`step=${encodeURIComponent(options.step)}`)
+    const data = await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/patterns?${params.join('&')}`,
+      undefined,
+      options.signal,
+    )
+    return { connected: true, items: mapLokiPatterns(data) }
   }
 
   async deleteSeries(

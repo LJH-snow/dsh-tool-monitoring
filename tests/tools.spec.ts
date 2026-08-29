@@ -27,9 +27,15 @@ describe('tool definitions', () => {
       'alertmanager_list_silences',
       'alertmanager_send_alerts',
       'loki_get_index_stats',
+      'loki_get_index_volume',
+      'loki_get_index_volume_range',
       'loki_get_label_values',
+      'loki_get_patterns',
       'loki_get_status',
+      'loki_list_alerts',
       'loki_list_labels',
+      'loki_list_rule_groups',
+      'loki_list_rules',
       'loki_list_series',
       'loki_query',
       'loki_query_range',
@@ -103,6 +109,86 @@ describe('tool definitions', () => {
     expect(fetchImpl.mock.calls[0][0]).toBe(
       'http://loki:3100/loki/api/v1/query_range?query=%7Bapp%3D%22api%22%7D&start=1700000000&end=1700003600',
     )
+  })
+
+  it('executes Loki rule, alert, volume, and pattern read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response('ns1:\n- name: group-a\n', {
+        status: 200,
+        headers: { 'content-type': 'application/yaml' },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          groups: [{
+            name: 'group-a',
+            file: 'rules.yaml',
+            rules: [{
+              name: 'cpu_high',
+              type: 'alerting',
+              health: 'ok',
+              lastError: '',
+              query: 'sum(rate({job="app"}[5m]))',
+              duration: '5m',
+              labels: {},
+              annotations: {},
+              alerts: [],
+            }],
+          }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          alerts: [{
+            state: 'firing',
+            value: '1e+00',
+            activeAt: '2026-08-28T00:00:00Z',
+            labels: { alertname: 'HighCPU' },
+            annotations: {},
+          }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          resultType: 'vector',
+          result: [{ metric: { job: 'app' }, value: [1700000000, '2048'] }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          resultType: 'matrix',
+          result: [{ metric: { job: 'app' }, values: [[1700000000, '1024']] }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: [{ pattern: 'level=info <_>', samples: [[1711839260, 1], [1711839270, 2]] }],
+      }))
+    const map = tools(new MonitoringClient({ lokiBaseUrl: 'http://loki:3100', fetchImpl }))
+
+    expect((await map.loki_list_rule_groups.execute({}, exec())).ruleGroupsYaml).toContain('group-a')
+    expect((await map.loki_list_rules.execute({}, exec())).items).toHaveLength(1)
+    expect((await map.loki_list_alerts.execute({}, exec())).items).toHaveLength(1)
+    expect(await map.loki_get_index_volume.execute({
+      query: '{job="app"}',
+      start: '1700000000',
+      end: '1700003600',
+    }, exec())).toMatchObject({ connected: true, totalBytes: 2048 })
+    expect(await map.loki_get_index_volume_range.execute({
+      query: '{job="app"}',
+      start: '1700000000',
+      end: '1700003600',
+      step: '60s',
+    }, exec())).toMatchObject({ connected: true, totalBytes: 1024 })
+    expect((await map.loki_get_patterns.execute({
+      query: '{job="app"}',
+      start: '1711839260',
+      end: '1711839280',
+    }, exec())).items[0].totalCount).toBe(3)
+    expect(fetchImpl.mock.calls.length).toBe(6)
   })
 
   it('keeps all write tools gated when allowWrite is not enabled', async () => {

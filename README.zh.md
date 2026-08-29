@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series 与 index 统计，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume 与检测到的模式，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
 
 插件遵循官方「一切皆插件」架构，通过 `ctx.tools.register(defineTool(...))` 注册模型可见工具，并符合 [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) 契约。
 
@@ -74,6 +74,12 @@ Loki 工具：
 | `loki_list_series` | 按 LogQL selector 查找 streams | 否 |
 | `loki_get_index_stats` | 查看 streams/chunks/entries/bytes 索引统计 | 否 |
 | `loki_get_status` | 查看 Loki 构建信息 | 否 |
+| `loki_list_rule_groups` | 查看当前 tenant 的 ruler rule groups（YAML） | 否 |
+| `loki_list_rules` | 查看 Loki 暴露的 alerting 与 recording rules | 否 |
+| `loki_list_alerts` | 查看活跃 Loki alerting rules | 否 |
+| `loki_get_index_volume` | 查看 label/series 聚合的 index volume | 否 |
+| `loki_get_index_volume_range` | 按时间范围查看 index volume matrix | 否 |
+| `loki_get_patterns` | 查看 Loki 日志中检测到的 patterns | 否 |
 
 Alertmanager 工具：
 

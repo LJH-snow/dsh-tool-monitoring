@@ -213,6 +213,127 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[4][0]).toBe('http://loki:3100/loki/api/v1/status/buildinfo')
   })
 
+  it('maps Loki rule groups, rules, alerts, index volume, volume range, and patterns', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response('---\nns1:\n- name: group-a\n  interval: 1m\n', {
+        status: 200,
+        headers: { 'content-type': 'application/yaml' },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          groups: [{
+            name: 'group-a',
+            file: 'rules.yaml',
+            rules: [{
+              name: 'cpu_high',
+              type: 'alerting',
+              health: 'ok',
+              lastError: '',
+              query: 'sum(rate({app="api"}[5m]))',
+              duration: '5m',
+              labels: { severity: 'critical' },
+              annotations: { summary: 'CPU high' },
+              alerts: [{}],
+            }],
+          }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          alerts: [{
+            state: 'firing',
+            value: '1e+00',
+            activeAt: '2026-08-28T00:00:00Z',
+            labels: { alertname: 'HighCPU' },
+            annotations: { summary: 'CPU high' },
+          }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          resultType: 'vector',
+          result: [{ metric: { job: 'api' }, value: [1700000000, '1024'] }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          resultType: 'matrix',
+          result: [{ metric: { job: 'api' }, values: [[1700000000, '2048'], [1700000060, '4096']] }],
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: [{ pattern: '<_> level=info', samples: [[1711839260, 1], [1711839270, 2]] }],
+      }))
+    const client = new MonitoringClient({ lokiBaseUrl: 'http://loki:3100', fetchImpl })
+
+    expect((await client.lokiListRuleGroups()).ruleGroupsYaml).toContain('group-a')
+    expect((await client.lokiListRules({ type: 'alert', file: 'rules.yaml' })).items[0]).toMatchObject({
+      group: 'group-a',
+      file: 'rules.yaml',
+      name: 'cpu_high',
+      type: 'alerting',
+      activeAlertCount: 1,
+    })
+    expect((await client.lokiListAlerts()).items[0]).toMatchObject({
+      state: 'firing',
+      labelsJson: expect.stringContaining('HighCPU'),
+    })
+    expect(await client.lokiGetIndexVolume('{job="api"}', {
+      start: '1700000000',
+      end: '1700003600',
+      aggregateBy: 'series',
+      targetLabels: 'job',
+    })).toMatchObject({
+      connected: true,
+      resultType: 'vector',
+      seriesCount: 1,
+      totalBytes: 1024,
+    })
+    expect(await client.lokiGetIndexVolumeRange('{job="api"}', {
+      start: '1700000000',
+      end: '1700003600',
+      step: '60s',
+      limit: 50,
+    })).toMatchObject({
+      connected: true,
+      resultType: 'matrix',
+      seriesCount: 1,
+      totalBytes: 6144,
+    })
+    expect((await client.lokiGetPatterns('{job="api"}', {
+      start: '1711839260',
+      end: '1711839280',
+      step: '10s',
+    })).items[0]).toMatchObject({
+      pattern: '<_> level=info',
+      sampleCount: 2,
+      totalCount: 3,
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({
+      accept: expect.stringContaining('application/yaml'),
+    })
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://loki:3100/loki/api/v1/rules')
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://loki:3100/prometheus/api/v1/rules?type=alert&file=rules.yaml',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://loki:3100/prometheus/api/v1/alerts')
+    expect(fetchImpl.mock.calls[3][0]).toBe(
+      'http://loki:3100/loki/api/v1/index/volume?query=%7Bjob%3D%22api%22%7D&start=1700000000&end=1700003600&targetLabels=job&aggregateBy=series',
+    )
+    expect(fetchImpl.mock.calls[4][0]).toContain(
+      '/loki/api/v1/index/volume_range?query=%7Bjob%3D%22api%22%7D&start=1700000000&end=1700003600&step=60s&limit=50',
+    )
+    expect(fetchImpl.mock.calls[5][0]).toBe(
+      'http://loki:3100/loki/api/v1/patterns?query=%7Bjob%3D%22api%22%7D&start=1711839260&end=1711839280&step=10s',
+    )
+  })
+
   it('maps Alertmanager status, alerts, groups, silences, and receivers', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(am({ versionInfo: { version: '0.27.0' }, uptime: '2026-08-28T00:00:00Z' }))
