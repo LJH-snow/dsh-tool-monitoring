@@ -18,6 +18,10 @@ import {
   type GrafanaHealthData,
   type GrafanaNotificationPolicyData,
   type GrafanaOrgUserItem,
+  type GrafanaOrgQuotaItem,
+  type GrafanaServiceAccountData,
+  type GrafanaServiceAccountItem,
+  type GrafanaServiceAccountTokenItem,
   type GrafanaTeamData,
   type GrafanaTeamItem,
   type GrafanaTeamMemberItem,
@@ -1969,6 +1973,147 @@ export function createTools(client: MonitoringClient) {
         return client.grafanaListOrgUsers({ signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_service_accounts',
+      description: 'Search Grafana service accounts by query and pagination, with role, token count, and access control metadata.',
+      parameters: {
+        query: { type: 'string', description: 'Optional service account name query' },
+        page: { type: 'integer', description: 'Page number, default 1' },
+        perPage: { type: 'integer', description: 'Service accounts per page, default 1000' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            totalCount: { type: 'number' },
+            page: { type: 'number' },
+            perPage: { type: 'number' },
+            items: { type: 'array', items: grafanaServiceAccountItemSchema },
+          },
+        },
+        render: (_args, value) => renderGrafanaServiceAccounts(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana service accounts ${args.query ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; totalCount?: number; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${v.totalCount ?? (v.items ?? []).length} service account(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListServiceAccounts({
+          query: args.query,
+          page: args.page,
+          perPage: args.perPage,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_service_account',
+      description: 'Get one Grafana service account by ID with role, token count, and access control metadata.',
+      parameters: {
+        serviceAccountId: { type: 'integer', required: true, description: 'Grafana service account ID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaServiceAccountItemSchema,
+          },
+        },
+        render: (_args, value) => renderGrafanaServiceAccount(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana service account ${args.serviceAccountId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { name?: string } }
+        return { card: 'generic', title: v.connected ? `Service account ${v.item?.name ?? ''}` : 'Grafana unavailable' }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetServiceAccount(args.serviceAccountId as number, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_service_account_tokens',
+      description: 'List tokens for one Grafana service account with creation, expiration, and expired state.',
+      parameters: {
+        serviceAccountId: { type: 'integer', required: true, description: 'Grafana service account ID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaServiceAccountTokenItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaServiceAccountTokens(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana service account tokens ${args.serviceAccountId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} token(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListServiceAccountTokens(args.serviceAccountId as number, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_org_quotas',
+      description: 'List current Grafana organization quotas with target, limit, and used values.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaOrgQuotaItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaOrgQuotas(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana org quotas', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} quota(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListOrgQuotas({ signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -2180,6 +2325,47 @@ const grafanaOrgUserItemSchema = {
     isExternal: { type: 'boolean' },
     lastSeenAt: { type: 'string' },
     lastSeenAtAge: { type: 'string' },
+  },
+} as const
+
+const grafanaServiceAccountItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    name: { type: 'string' },
+    login: { type: 'string' },
+    orgId: { type: 'number' },
+    isDisabled: { type: 'boolean' },
+    role: { type: 'string' },
+    tokens: { type: 'number' },
+    avatarUrl: { type: 'string' },
+    accessControlJson: { type: 'string' },
+  },
+} as const
+
+const grafanaServiceAccountTokenItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    name: { type: 'string' },
+    role: { type: 'string' },
+    created: { type: 'string' },
+    expiration: { type: 'string' },
+    secondsUntilExpiration: { type: 'number' },
+    hasExpired: { type: 'boolean' },
+  },
+} as const
+
+const grafanaOrgQuotaItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    orgId: { type: 'number' },
+    target: { type: 'string' },
+    limit: { type: 'number' },
+    used: { type: 'number' },
   },
 } as const
 
@@ -2509,5 +2695,34 @@ function renderGrafanaOrgUsers(items: Array<Partial<GrafanaOrgUserItem>>) {
   if (!items.length) return text('No Grafana organization users found.')
   return text(items.map(user =>
     `${user.login ?? ''} ${user.email ?? ''} role=${user.role ?? 'unknown'} lastSeen=${user.lastSeenAtAge ?? ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaServiceAccounts(value: { connected?: boolean; reason?: string; totalCount?: number; page?: number; perPage?: number; items?: Array<Partial<GrafanaServiceAccountItem>> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  if (!value.items?.length) return text('No Grafana service accounts found.')
+  return text(value.items.map(account =>
+    `${account.login ?? ''} ${account.name ?? ''} role=${account.role ?? 'unknown'} tokens=${account.tokens ?? 0} ${account.isDisabled ? 'disabled' : 'enabled'}`,
+  ).join('\n'))
+}
+
+function renderGrafanaServiceAccount(value: { connected?: boolean; reason?: string; item?: Partial<GrafanaServiceAccountItem> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  const item = value.item
+  if (!item?.id && !item?.name) return text('No Grafana service account found.')
+  return text(`${item.name ?? ''} (${item.id ?? 0})\nlogin: ${item.login ?? ''}\norg: ${item.orgId ?? 0}\nrole: ${item.role ?? ''}\ntokens: ${item.tokens ?? 0}\n${item.accessControlJson ?? '{}'}`)
+}
+
+function renderGrafanaServiceAccountTokens(items: Array<Partial<GrafanaServiceAccountTokenItem>>) {
+  if (!items.length) return text('No Grafana service account tokens found.')
+  return text(items.map(token =>
+    `${token.name ?? ''} (${token.id ?? 0}) role=${token.role ?? ''} expired=${token.hasExpired ? 'yes' : 'no'} expiration=${token.expiration ?? ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaOrgQuotas(items: Array<Partial<GrafanaOrgQuotaItem>>) {
+  if (!items.length) return text('No Grafana organization quotas found.')
+  return text(items.map(quota =>
+    `${quota.target ?? ''} used=${quota.used ?? 0} limit=${quota.limit ?? 0}`,
   ).join('\n'))
 }

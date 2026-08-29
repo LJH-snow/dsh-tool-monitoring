@@ -31,6 +31,7 @@ describe('tool definitions', () => {
       'grafana_get_datasource',
       'grafana_get_health',
       'grafana_get_notification_policy',
+      'grafana_get_service_account',
       'grafana_get_team',
       'grafana_list_alert_instances',
       'grafana_list_alert_rules',
@@ -38,7 +39,10 @@ describe('tool definitions', () => {
       'grafana_list_contact_points',
       'grafana_list_datasources',
       'grafana_list_folders',
+      'grafana_list_org_quotas',
       'grafana_list_org_users',
+      'grafana_list_service_account_tokens',
+      'grafana_list_service_accounts',
       'grafana_list_team_members',
       'grafana_list_teams',
       'grafana_search_dashboards',
@@ -448,6 +452,91 @@ describe('tool definitions', () => {
     expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/teams/1')
     expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/teams/1/members')
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/users')
+  })
+
+  it('executes Grafana service account and org quota read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({
+        totalCount: 1,
+        page: 1,
+        perPage: 10,
+        serviceAccounts: [{
+          id: 1,
+          name: 'metrics',
+          login: 'sa-metrics',
+          orgId: 1,
+          isDisabled: false,
+          role: 'Editor',
+          tokens: 2,
+          avatarUrl: '/avatar/metrics',
+          accessControl: { 'serviceaccounts:read': true },
+        }],
+      }))
+      .mockResolvedValueOnce(json({
+        id: 1,
+        name: 'metrics',
+        login: 'sa-metrics',
+        orgId: 1,
+        isDisabled: false,
+        role: 'Editor',
+        tokens: 2,
+        avatarUrl: '/avatar/metrics',
+        accessControl: { 'serviceaccounts:read': true },
+      }))
+      .mockResolvedValueOnce(json([{
+        id: 11,
+        name: 'ci-token',
+        role: 'Editor',
+        created: '2026-08-30T00:00:00Z',
+        expiration: null,
+        secondsUntilExpiration: 0,
+        hasExpired: false,
+      }]))
+      .mockResolvedValueOnce(json([
+        { orgId: 1, target: 'org', limit: -1, used: 1 },
+        { orgId: 1, target: 'alertRule', limit: 100, used: 3 },
+      ]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect((await map.grafana_list_service_accounts.execute({
+      query: 'metrics',
+      page: 1,
+      perPage: 10,
+    }, exec()))).toMatchObject({
+      connected: true,
+      totalCount: 1,
+      page: 1,
+      perPage: 10,
+      items: [{
+        id: 1,
+        name: 'metrics',
+        login: 'sa-metrics',
+        role: 'Editor',
+        tokens: 2,
+        accessControlJson: expect.stringContaining('serviceaccounts:read'),
+      }],
+    })
+    expect((await map.grafana_get_service_account.execute({ serviceAccountId: 1 }, exec())).item).toMatchObject({
+      id: 1,
+      name: 'metrics',
+      role: 'Editor',
+    })
+    expect((await map.grafana_list_service_account_tokens.execute({ serviceAccountId: 1 }, exec())).items[0]).toMatchObject({
+      id: 11,
+      name: 'ci-token',
+      hasExpired: false,
+    })
+    expect((await map.grafana_list_org_quotas.execute({}, exec())).items).toMatchObject([
+      { orgId: 1, target: 'org', limit: -1, used: 1 },
+      { target: 'alertRule', used: 3 },
+    ])
+    expect(fetchImpl.mock.calls.length).toBe(4)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/serviceaccounts/search?query=metrics&page=1&perpage=10',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/serviceaccounts/1')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/serviceaccounts/1/tokens')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/quotas')
   })
 
   it('executes Loki detected field and Grafana alert observation tools', async () => {

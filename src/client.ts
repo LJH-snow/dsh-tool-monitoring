@@ -332,6 +332,43 @@ export interface GrafanaOrgUserItem {
   lastSeenAtAge: string
 }
 
+export interface GrafanaServiceAccountItem {
+  id: number
+  name: string
+  login: string
+  orgId: number
+  isDisabled: boolean
+  role: string
+  tokens: number
+  avatarUrl: string
+  accessControlJson: string
+}
+
+export interface GrafanaServiceAccountData {
+  connected: boolean
+  totalCount: number
+  page: number
+  perPage: number
+  items: GrafanaServiceAccountItem[]
+}
+
+export interface GrafanaServiceAccountTokenItem {
+  id: number
+  name: string
+  role: string
+  created: string
+  expiration: string
+  secondsUntilExpiration: number
+  hasExpired: boolean
+}
+
+export interface GrafanaOrgQuotaItem {
+  orgId: number
+  target: string
+  limit: number
+  used: number
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -689,6 +726,44 @@ function mapGrafanaOrgUser(data: unknown): GrafanaOrgUserItem {
     isExternal: asBoolean(record, 'isExternal') || asBoolean(record, 'is_external'),
     lastSeenAt: asString(record, 'lastSeenAt'),
     lastSeenAtAge: asString(record, 'lastSeenAtAge'),
+  }
+}
+
+function mapGrafanaServiceAccount(data: unknown): GrafanaServiceAccountItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    name: asString(record, 'name'),
+    login: asString(record, 'login'),
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    isDisabled: asBoolean(record, 'isDisabled'),
+    role: asString(record, 'role'),
+    tokens: asNumber(record, 'tokens'),
+    avatarUrl: asString(record, 'avatarUrl'),
+    accessControlJson: toJson(record.accessControl),
+  }
+}
+
+function mapGrafanaServiceAccountToken(data: unknown): GrafanaServiceAccountTokenItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    name: asString(record, 'name'),
+    role: asString(record, 'role'),
+    created: asString(record, 'created'),
+    expiration: asString(record, 'expiration'),
+    secondsUntilExpiration: asNumber(record, 'secondsUntilExpiration'),
+    hasExpired: asBoolean(record, 'hasExpired'),
+  }
+}
+
+function mapGrafanaOrgQuota(data: unknown): GrafanaOrgQuotaItem {
+  const record = asRecord(data)
+  return {
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    target: asString(record, 'target'),
+    limit: asNumber(record, 'limit'),
+    used: asNumber(record, 'used'),
   }
 }
 
@@ -1686,6 +1761,77 @@ export class MonitoringClient {
       options.signal,
     )
     const items = asArray(data).map(mapGrafanaOrgUser)
+    return { connected: true, items }
+  }
+
+  async grafanaListServiceAccounts(
+    options: {
+      query?: string
+      page?: number
+      perPage?: number
+      signal?: AbortSignal
+    } = {},
+  ): Promise<GrafanaServiceAccountData> {
+    const params: string[] = []
+    if (options.query) params.push(`query=${encodeURIComponent(options.query)}`)
+    if (options.page && options.page > 0) params.push(`page=${Math.floor(options.page)}`)
+    if (options.perPage && options.perPage > 0) params.push(`perpage=${Math.floor(options.perPage)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = asRecord(await this.grafanaRequest(
+      'GET',
+      `/api/serviceaccounts/search${suffix}`,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      totalCount: asNumber(data, 'totalCount'),
+      page: asNumber(data, 'page') || 1,
+      perPage: asNumber(data, 'perPage') || asNumber(data, 'perpage') || 0,
+      items: asArray(data.serviceAccounts).map(mapGrafanaServiceAccount),
+    }
+  }
+
+  async grafanaGetServiceAccount(
+    serviceAccountId: string | number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    item: GrafanaServiceAccountItem
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/serviceaccounts/${encodeURIComponent(String(serviceAccountId))}`,
+      options.signal,
+    )
+    return { connected: true, item: mapGrafanaServiceAccount(data) }
+  }
+
+  async grafanaListServiceAccountTokens(
+    serviceAccountId: string | number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaServiceAccountTokenItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/serviceaccounts/${encodeURIComponent(String(serviceAccountId))}/tokens`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaServiceAccountToken)
+    return { connected: true, items }
+  }
+
+  async grafanaListOrgQuotas(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaOrgQuotaItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/org/quotas',
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaOrgQuota)
     return { connected: true, items }
   }
 

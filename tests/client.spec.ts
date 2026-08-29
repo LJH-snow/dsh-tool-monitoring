@@ -646,6 +646,100 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/users')
   })
 
+  it('maps Grafana service accounts, tokens, and org quotas', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am({
+        totalCount: 1,
+        page: 1,
+        perPage: 10,
+        serviceAccounts: [{
+          id: 1,
+          name: 'metrics',
+          login: 'sa-metrics',
+          orgId: 1,
+          isDisabled: false,
+          role: 'Editor',
+          tokens: 2,
+          avatarUrl: '/avatar/metrics',
+          accessControl: { 'serviceaccounts:read': true },
+        }],
+      }))
+      .mockResolvedValueOnce(am({
+        id: 1,
+        name: 'metrics',
+        login: 'sa-metrics',
+        orgId: 1,
+        isDisabled: false,
+        role: 'Editor',
+        tokens: 2,
+        avatarUrl: '/avatar/metrics',
+        accessControl: { 'serviceaccounts:read': true },
+      }))
+      .mockResolvedValueOnce(am([{
+        id: 11,
+        name: 'ci-token',
+        role: 'Editor',
+        created: '2026-08-30T00:00:00Z',
+        expiration: null,
+        secondsUntilExpiration: 0,
+        hasExpired: false,
+      }]))
+      .mockResolvedValueOnce(am([
+        { orgId: 1, target: 'org', limit: -1, used: 1 },
+        { orgId: 1, target: 'alertRule', limit: 100, used: 3 },
+      ]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListServiceAccounts({
+      query: 'metrics',
+      page: 1,
+      perPage: 10,
+    })).toMatchObject({
+      connected: true,
+      totalCount: 1,
+      page: 1,
+      perPage: 10,
+      items: [{
+        id: 1,
+        name: 'metrics',
+        login: 'sa-metrics',
+        role: 'Editor',
+        tokens: 2,
+        accessControlJson: expect.stringContaining('serviceaccounts:read'),
+      }],
+    })
+    expect(await client.grafanaGetServiceAccount(1)).toMatchObject({
+      connected: true,
+      item: {
+        id: 1,
+        name: 'metrics',
+        isDisabled: false,
+      },
+    })
+    expect((await client.grafanaListServiceAccountTokens(1)).items[0]).toMatchObject({
+      id: 11,
+      name: 'ci-token',
+      role: 'Editor',
+      hasExpired: false,
+    })
+    expect((await client.grafanaListOrgQuotas()).items).toMatchObject([
+      { orgId: 1, target: 'org', limit: -1, used: 1 },
+      { orgId: 1, target: 'alertRule', used: 3 },
+    ])
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/serviceaccounts/search?query=metrics&page=1&perpage=10',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/serviceaccounts/1')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/serviceaccounts/1/tokens')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/quotas')
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({

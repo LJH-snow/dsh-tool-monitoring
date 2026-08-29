@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、数据源、面板、目录、注解、告警规则、告警实例、团队、组织用户、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、数据源、面板、目录、注解、告警规则、告警实例、服务账号、团队、组织用户、组织配额、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
 
 插件遵循官方「一切皆插件」架构，通过 `ctx.tools.register(defineTool(...))` 注册模型可见工具，并符合 [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) 契约。
 
@@ -105,6 +105,10 @@ Grafana 工具：
 | `grafana_get_team` | 按 ID 查看单个 Grafana 团队 | 否 |
 | `grafana_list_team_members` | 查看某个 Grafana 团队的成员 | 否 |
 | `grafana_list_org_users` | 查看当前组织用户、角色与最近活跃信息 | 否 |
+| `grafana_list_service_accounts` | 按 query 与分页搜索 Grafana 服务账号，含角色、token 数与 access control 信息 | 否 |
+| `grafana_get_service_account` | 按 ID 查看单个 Grafana 服务账号，含角色、token 数与 access control 信息 | 否 |
+| `grafana_list_service_account_tokens` | 查看某个 Grafana 服务账号的 token，含创建、过期与失效状态 | 否 |
+| `grafana_list_org_quotas` | 查看当前 Grafana 组织配额、目标、上限与已用值 | 否 |
 
 Alertmanager 工具：
 
