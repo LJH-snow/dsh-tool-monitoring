@@ -550,6 +550,102 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/v1/provisioning/policies')
   })
 
+  it('maps Grafana teams, team members, and org users', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am({
+        totalCount: 1,
+        page: 1,
+        perPage: 10,
+        teams: [{
+          id: 1,
+          orgId: 1,
+          name: 'SRE',
+          email: 'sre@example.com',
+          avatarUrl: '/avatar/sre',
+          memberCount: 3,
+        }],
+      }))
+      .mockResolvedValueOnce(am({
+        id: 1,
+        orgId: 1,
+        name: 'SRE',
+        email: 'sre@example.com',
+        created: '2026-08-30T00:00:00Z',
+        updated: '2026-08-30T01:00:00Z',
+      }))
+      .mockResolvedValueOnce(am([{
+        orgId: 1,
+        teamId: 1,
+        userId: 10,
+        email: 'alice@example.com',
+        login: 'alice',
+        name: 'Alice',
+        avatarUrl: '/avatar/alice',
+      }]))
+      .mockResolvedValueOnce(am([{
+        orgId: 1,
+        userId: 10,
+        email: 'alice@example.com',
+        login: 'alice',
+        name: 'Alice',
+        role: 'Admin',
+        isExternal: false,
+        lastSeenAt: '2026-08-30T00:00:00Z',
+        lastSeenAtAge: '2m',
+      }]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListTeams({
+      query: 'ops',
+      sort: 'memberCount-desc',
+      page: 1,
+      perPage: 10,
+    })).toMatchObject({
+      connected: true,
+      totalCount: 1,
+      page: 1,
+      perPage: 10,
+      items: [{
+        id: 1,
+        orgId: 1,
+        name: 'SRE',
+        memberCount: 3,
+      }],
+    })
+    expect(await client.grafanaGetTeam(1)).toMatchObject({
+      connected: true,
+      item: {
+        id: 1,
+        name: 'SRE',
+        created: '2026-08-30T00:00:00Z',
+      },
+    })
+    expect((await client.grafanaListTeamMembers(1)).items[0]).toMatchObject({
+      orgId: 1,
+      teamId: 1,
+      userId: 10,
+      login: 'alice',
+    })
+    expect((await client.grafanaListOrgUsers()).items[0]).toMatchObject({
+      orgId: 1,
+      userId: 10,
+      role: 'Admin',
+      lastSeenAtAge: '2m',
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/teams/search?query=ops&sort=memberCount-desc&page=1&perpage=10',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/teams/1')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/teams/1/members')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/users')
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({

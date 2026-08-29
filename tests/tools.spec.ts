@@ -31,12 +31,16 @@ describe('tool definitions', () => {
       'grafana_get_datasource',
       'grafana_get_health',
       'grafana_get_notification_policy',
+      'grafana_get_team',
       'grafana_list_alert_instances',
       'grafana_list_alert_rules',
       'grafana_list_annotations',
       'grafana_list_contact_points',
       'grafana_list_datasources',
       'grafana_list_folders',
+      'grafana_list_org_users',
+      'grafana_list_team_members',
+      'grafana_list_teams',
       'grafana_search_dashboards',
       'loki_get_detected_field_values',
       'loki_get_detected_fields',
@@ -362,6 +366,88 @@ describe('tool definitions', () => {
     expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/v1/provisioning/alert-rules/rule-1')
     expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/v1/provisioning/contact-points')
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/v1/provisioning/policies')
+  })
+
+  it('executes Grafana team and org user read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({
+        totalCount: 1,
+        page: 1,
+        perPage: 10,
+        teams: [{
+          id: 1,
+          orgId: 1,
+          name: 'SRE',
+          email: 'sre@example.com',
+          avatarUrl: '/avatar/sre',
+          memberCount: 3,
+        }],
+      }))
+      .mockResolvedValueOnce(json({
+        id: 1,
+        orgId: 1,
+        name: 'SRE',
+        email: 'sre@example.com',
+        created: '2026-08-30T00:00:00Z',
+        updated: '2026-08-30T01:00:00Z',
+      }))
+      .mockResolvedValueOnce(json([{
+        orgId: 1,
+        teamId: 1,
+        userId: 10,
+        email: 'alice@example.com',
+        login: 'alice',
+        name: 'Alice',
+        avatarUrl: '/avatar/alice',
+      }]))
+      .mockResolvedValueOnce(json([{
+        orgId: 1,
+        userId: 10,
+        email: 'alice@example.com',
+        login: 'alice',
+        name: 'Alice',
+        role: 'Admin',
+        isExternal: false,
+        lastSeenAt: '2026-08-30T00:00:00Z',
+        lastSeenAtAge: '2m',
+      }]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect((await map.grafana_list_teams.execute({
+      query: 'ops',
+      sort: 'memberCount-desc',
+      page: 1,
+      perPage: 10,
+    }, exec()))).toMatchObject({
+      connected: true,
+      totalCount: 1,
+      page: 1,
+      perPage: 10,
+      items: [{ id: 1, name: 'SRE', memberCount: 3 }],
+    })
+    expect((await map.grafana_get_team.execute({ teamId: 1 }, exec())).item).toMatchObject({
+      id: 1,
+      name: 'SRE',
+      orgId: 1,
+    })
+    expect((await map.grafana_list_team_members.execute({ teamId: 1 }, exec())).items[0]).toMatchObject({
+      teamId: 1,
+      userId: 10,
+      login: 'alice',
+    })
+    expect((await map.grafana_list_org_users.execute({}, exec())).items[0]).toMatchObject({
+      userId: 10,
+      email: 'alice@example.com',
+      role: 'Admin',
+      lastSeenAtAge: '2m',
+    })
+    expect(fetchImpl.mock.calls.length).toBe(4)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/teams/search?query=ops&sort=memberCount-desc&page=1&perpage=10',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/teams/1')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/teams/1/members')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/users')
   })
 
   it('executes Loki detected field and Grafana alert observation tools', async () => {

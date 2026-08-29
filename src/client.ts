@@ -290,6 +290,48 @@ export interface GrafanaNotificationPolicyData {
   policyJson: string
 }
 
+export interface GrafanaTeamItem {
+  id: number
+  orgId: number
+  name: string
+  email: string
+  avatarUrl: string
+  memberCount: number
+  permission: number
+  created: string
+  updated: string
+}
+
+export interface GrafanaTeamData {
+  connected: boolean
+  totalCount: number
+  page: number
+  perPage: number
+  items: GrafanaTeamItem[]
+}
+
+export interface GrafanaTeamMemberItem {
+  orgId: number
+  teamId: number
+  userId: number
+  email: string
+  login: string
+  name: string
+  avatarUrl: string
+}
+
+export interface GrafanaOrgUserItem {
+  orgId: number
+  userId: number
+  email: string
+  login: string
+  name: string
+  role: string
+  isExternal: boolean
+  lastSeenAt: string
+  lastSeenAtAge: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -604,6 +646,49 @@ function mapGrafanaNotificationPolicy(data: unknown): GrafanaNotificationPolicyD
     groupInterval: asString(record, 'group_interval'),
     repeatInterval: asString(record, 'repeat_interval'),
     policyJson: JSON.stringify(data ?? {}),
+  }
+}
+
+function mapGrafanaTeam(data: unknown): GrafanaTeamItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    name: asString(record, 'name'),
+    email: asString(record, 'email'),
+    avatarUrl: asString(record, 'avatarUrl'),
+    memberCount: asNumber(record, 'memberCount'),
+    permission: asNumber(record, 'permission'),
+    created: asString(record, 'created'),
+    updated: asString(record, 'updated'),
+  }
+}
+
+function mapGrafanaTeamMember(data: unknown): GrafanaTeamMemberItem {
+  const record = asRecord(data)
+  return {
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    teamId: asNumber(record, 'teamId') || asNumber(record, 'teamID'),
+    userId: asNumber(record, 'userId') || asNumber(record, 'userID'),
+    email: asString(record, 'email'),
+    login: asString(record, 'login'),
+    name: asString(record, 'name'),
+    avatarUrl: asString(record, 'avatarUrl'),
+  }
+}
+
+function mapGrafanaOrgUser(data: unknown): GrafanaOrgUserItem {
+  const record = asRecord(data)
+  return {
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    userId: asNumber(record, 'userId') || asNumber(record, 'userID'),
+    email: asString(record, 'email'),
+    login: asString(record, 'login'),
+    name: asString(record, 'name'),
+    role: asString(record, 'role'),
+    isExternal: asBoolean(record, 'isExternal') || asBoolean(record, 'is_external'),
+    lastSeenAt: asString(record, 'lastSeenAt'),
+    lastSeenAtAge: asString(record, 'lastSeenAtAge'),
   }
 }
 
@@ -1527,6 +1612,81 @@ export class MonitoringClient {
       options.signal,
     )
     return mapGrafanaNotificationPolicy(data)
+  }
+
+  async grafanaListTeams(
+    options: {
+      query?: string
+      name?: string
+      sort?: string
+      page?: number
+      perPage?: number
+      signal?: AbortSignal
+    } = {},
+  ): Promise<GrafanaTeamData> {
+    const params: string[] = []
+    if (options.query) params.push(`query=${encodeURIComponent(options.query)}`)
+    if (options.name) params.push(`name=${encodeURIComponent(options.name)}`)
+    if (options.sort) params.push(`sort=${encodeURIComponent(options.sort)}`)
+    if (options.page && options.page > 0) params.push(`page=${Math.floor(options.page)}`)
+    if (options.perPage && options.perPage > 0) params.push(`perpage=${Math.floor(options.perPage)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = asRecord(await this.grafanaRequest(
+      'GET',
+      `/api/teams/search${suffix}`,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      totalCount: asNumber(data, 'totalCount'),
+      page: asNumber(data, 'page') || 1,
+      perPage: asNumber(data, 'perPage') || asNumber(data, 'perpage') || 0,
+      items: asArray(data.teams).map(mapGrafanaTeam),
+    }
+  }
+
+  async grafanaGetTeam(
+    teamId: string | number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    item: GrafanaTeamItem
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/teams/${encodeURIComponent(String(teamId))}`,
+      options.signal,
+    )
+    return { connected: true, item: mapGrafanaTeam(data) }
+  }
+
+  async grafanaListTeamMembers(
+    teamId: string | number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaTeamMemberItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/teams/${encodeURIComponent(String(teamId))}/members`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaTeamMember)
+    return { connected: true, items }
+  }
+
+  async grafanaListOrgUsers(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaOrgUserItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/org/users',
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaOrgUser)
+    return { connected: true, items }
   }
 
   async deleteSeries(

@@ -17,6 +17,10 @@ import {
   type GrafanaFolderItem,
   type GrafanaHealthData,
   type GrafanaNotificationPolicyData,
+  type GrafanaOrgUserItem,
+  type GrafanaTeamData,
+  type GrafanaTeamItem,
+  type GrafanaTeamMemberItem,
   type LokiDetectedFieldItem,
   type LokiAlertItem,
   type LokiIndexStats,
@@ -1820,6 +1824,151 @@ export function createTools(client: MonitoringClient) {
         return client.grafanaGetNotificationPolicy({ signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_teams',
+      description: 'Search Grafana teams by query, exact name, sort, and pagination.',
+      parameters: {
+        query: { type: 'string', description: 'Optional team name query' },
+        name: { type: 'string', description: 'Optional exact team name filter' },
+        sort: { type: 'string', description: 'Optional sort option, for example memberCount-desc' },
+        page: { type: 'integer', description: 'Page number, default 1' },
+        perPage: { type: 'integer', description: 'Teams per page, default 1000' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            totalCount: { type: 'number' },
+            page: { type: 'number' },
+            perPage: { type: 'number' },
+            items: { type: 'array', items: grafanaTeamItemSchema },
+          },
+        },
+        render: (_args, value) => renderGrafanaTeams(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana teams ${args.query ?? args.name ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; totalCount?: number; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${v.totalCount ?? (v.items ?? []).length} team(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListTeams({
+          query: args.query,
+          name: args.name,
+          sort: args.sort,
+          page: args.page,
+          perPage: args.perPage,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_team',
+      description: 'Get one Grafana team by ID with organization, member count, and timestamps.',
+      parameters: {
+        teamId: { type: 'integer', required: true, description: 'Grafana team ID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaTeamItemSchema,
+          },
+        },
+        render: (_args, value) => renderGrafanaTeam(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana team ${args.teamId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { name?: string } }
+        return { card: 'generic', title: v.connected ? `Team ${v.item?.name ?? ''}` : 'Grafana unavailable' }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetTeam(args.teamId as number, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_team_members',
+      description: 'List members of one Grafana team by team ID.',
+      parameters: {
+        teamId: { type: 'integer', required: true, description: 'Grafana team ID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaTeamMemberItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaTeamMembers(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana team members ${args.teamId}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} member(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListTeamMembers(args.teamId as number, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_org_users',
+      description: 'List users in the current Grafana organization with roles and last seen information.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaOrgUserItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaOrgUsers(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana org users', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} org user(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListOrgUsers({ signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -1985,6 +2134,52 @@ const grafanaContactPointItemSchema = {
     type: { type: 'string' },
     settingsJson: { type: 'string' },
     disableResolveMessage: { type: 'boolean' },
+  },
+} as const
+
+const grafanaTeamItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    orgId: { type: 'number' },
+    name: { type: 'string' },
+    email: { type: 'string' },
+    avatarUrl: { type: 'string' },
+    memberCount: { type: 'number' },
+    permission: { type: 'number' },
+    created: { type: 'string' },
+    updated: { type: 'string' },
+  },
+} as const
+
+const grafanaTeamMemberItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    orgId: { type: 'number' },
+    teamId: { type: 'number' },
+    userId: { type: 'number' },
+    email: { type: 'string' },
+    login: { type: 'string' },
+    name: { type: 'string' },
+    avatarUrl: { type: 'string' },
+  },
+} as const
+
+const grafanaOrgUserItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    orgId: { type: 'number' },
+    userId: { type: 'number' },
+    email: { type: 'string' },
+    login: { type: 'string' },
+    name: { type: 'string' },
+    role: { type: 'string' },
+    isExternal: { type: 'boolean' },
+    lastSeenAt: { type: 'string' },
+    lastSeenAtAge: { type: 'string' },
   },
 } as const
 
@@ -2286,4 +2481,33 @@ function renderGrafanaContactPoints(items: Array<Partial<GrafanaContactPointItem
 function renderGrafanaNotificationPolicy(value: Partial<GrafanaNotificationPolicyData> & { reason?: string }) {
   if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
   return text(`receiver: ${value.receiver ?? ''}\ngroupBy: ${value.groupByJson ?? '[]'}\ngroupWait: ${value.groupWait ?? ''}\ngroupInterval: ${value.groupInterval ?? ''}\nrepeatInterval: ${value.repeatInterval ?? ''}\n${value.policyJson ?? ''}`)
+}
+
+function renderGrafanaTeams(value: { connected?: boolean; reason?: string; totalCount?: number; page?: number; perPage?: number; items?: Array<Partial<GrafanaTeamItem>> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  if (!value.items?.length) return text('No Grafana teams found.')
+  return text(value.items.map(team =>
+    `${team.name ?? ''} (${team.id ?? 0}) members=${team.memberCount ?? 0} org=${team.orgId ?? 0}`,
+  ).join('\n'))
+}
+
+function renderGrafanaTeam(value: { connected?: boolean; reason?: string; item?: Partial<GrafanaTeamItem> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  const item = value.item
+  if (!item?.id && !item?.name) return text('No Grafana team found.')
+  return text(`${item.name ?? ''} (${item.id ?? 0})\norg: ${item.orgId ?? 0}\nemail: ${item.email ?? ''}\nmembers: ${item.memberCount ?? 0}`)
+}
+
+function renderGrafanaTeamMembers(items: Array<Partial<GrafanaTeamMemberItem>>) {
+  if (!items.length) return text('No Grafana team members found.')
+  return text(items.map(member =>
+    `${member.login ?? ''} ${member.email ?? ''}${member.name ? ` ${member.name}` : ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaOrgUsers(items: Array<Partial<GrafanaOrgUserItem>>) {
+  if (!items.length) return text('No Grafana organization users found.')
+  return text(items.map(user =>
+    `${user.login ?? ''} ${user.email ?? ''} role=${user.role ?? 'unknown'} lastSeen=${user.lastSeenAtAge ?? ''}`,
+  ).join('\n'))
 }
