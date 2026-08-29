@@ -7,11 +7,14 @@ import {
   type AlertmanagerAlertItem,
   type AlertmanagerGroupItem,
   type AlertmanagerSilenceItem,
+  type GrafanaAlertInstanceItem,
+  type GrafanaAnnotationItem,
   type GrafanaDashboardData,
   type GrafanaDashboardSummaryItem,
   type GrafanaDatasourceItem,
   type GrafanaFolderItem,
   type GrafanaHealthData,
+  type LokiDetectedFieldItem,
   type LokiAlertItem,
   type LokiIndexStats,
   type LokiPatternItem,
@@ -1274,6 +1277,101 @@ export function createTools(client: MonitoringClient) {
     }),
 
     defineTool({
+      name: 'loki_get_detected_fields',
+      description: 'Get fields detected in Loki log lines matching a stream selector.',
+      parameters: {
+        query: { type: 'string', required: true, description: 'LogQL stream selector, for example {job="app"}' },
+        start: { type: 'string', description: 'Optional start time as Unix nanoseconds or RFC 3339' },
+        end: { type: 'string', description: 'Optional end time as Unix nanoseconds or RFC 3339' },
+        since: { type: 'string', description: 'Optional relative time range, for example 1h' },
+        step: { type: 'string', description: 'Optional step between sample windows' },
+        lineLimit: { type: 'integer', description: 'Maximum log lines to scan per shard, default 100' },
+        limit: { type: 'integer', description: 'Maximum fields to return, default 1000' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: lokiDetectedFieldItemSchema },
+            limit: { type: 'number' },
+          },
+        },
+        render: (_args, value) => renderLokiDetectedFields(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Loki fields ${args.query}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Loki unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} field(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiGetDetectedFields(args.query as string, {
+          start: args.start,
+          end: args.end,
+          since: args.since,
+          step: args.step,
+          lineLimit: args.lineLimit,
+          limit: args.limit,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'loki_get_detected_field_values',
+      description: 'Get values observed for one detected Loki log field.',
+      parameters: {
+        fieldName: { type: 'string', required: true, description: 'Detected field name, for example level' },
+        query: { type: 'string', required: true, description: 'LogQL stream selector, for example {job="app"}' },
+        start: { type: 'string', description: 'Optional start time as Unix nanoseconds or RFC 3339' },
+        end: { type: 'string', description: 'Optional end time as Unix nanoseconds or RFC 3339' },
+        since: { type: 'string', description: 'Optional relative time range, for example 1h' },
+        step: { type: 'string', description: 'Optional step between sample windows' },
+        lineLimit: { type: 'integer', description: 'Maximum log lines to scan per shard, default 100' },
+        limit: { type: 'integer', description: 'Maximum values to return, default 1000' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: { type: 'string' } },
+            limit: { type: 'number' },
+          },
+        },
+        render: (_args, value) => renderLokiStrings(value, 'No values found for this detected field.'),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Loki field ${args.fieldName}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Loki unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} value(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasLoki()) return unavailable('Loki base URL is not configured.')
+        return client.lokiGetDetectedFieldValues(args.fieldName as string, args.query as string, {
+          start: args.start,
+          end: args.end,
+          since: args.since,
+          step: args.step,
+          lineLimit: args.lineLimit,
+          limit: args.limit,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
       name: 'grafana_get_health',
       description: 'Get Grafana health, database status, version, and commit information.',
       parameters: {},
@@ -1486,6 +1584,107 @@ export function createTools(client: MonitoringClient) {
         return client.grafanaListFolders({ signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_annotations',
+      description: 'List Grafana annotations filtered by time, dashboard, panel, type, and tags.',
+      parameters: {
+        from: { type: 'string', description: 'Start time as epoch milliseconds' },
+        to: { type: 'string', description: 'End time as epoch milliseconds' },
+        limit: { type: 'integer', description: 'Maximum annotations, default 100' },
+        dashboardUid: { type: 'string', description: 'Optional dashboard UID filter' },
+        panelId: { type: 'number', description: 'Optional panel ID filter' },
+        type: { type: 'string', enum: ['alert', 'annotation'], description: 'Optional annotation type filter' },
+        tagsJson: { type: 'string', description: 'Optional JSON array of annotation tags, for example ["prod"]' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaAnnotationItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAnnotations(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana annotations', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} annotation(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        const tags = args.tagsJson
+          ? parseJsonArray(args.tagsJson)
+          : { ok: true, value: undefined }
+        if (!tags.ok) return unavailable('tagsJson must be a valid JSON array.')
+        if (tags.value?.some(tag => typeof tag !== 'string')) {
+          return unavailable('tagsJson must contain string tags.')
+        }
+        return client.grafanaListAnnotations({
+          from: args.from,
+          to: args.to,
+          limit: args.limit,
+          dashboardUid: args.dashboardUid,
+          panelId: args.panelId,
+          type: args.type,
+          tags: (tags.value ?? []) as string[],
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_alert_instances',
+      description: 'List current Grafana-managed alert instances through the Alertmanager-compatible API.',
+      parameters: {
+        active: { type: 'boolean', description: 'Optional filter to exclude inactive alerts when false' },
+        silenced: { type: 'boolean', description: 'Optional filter to exclude silenced alerts when false' },
+        inhibited: { type: 'boolean', description: 'Optional filter to exclude inhibited alerts when false' },
+        receiver: { type: 'string', description: 'Optional receiver name filter' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaAlertInstanceItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAlertInstances(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana alert instances', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} alert instance(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListAlertInstances({
+          active: args.active,
+          silenced: args.silenced,
+          inhibited: args.inhibited,
+          receiver: args.receiver,
+          signal: exec.signal,
+        })
+      },
+    }),
   ]
 }
 
@@ -1523,6 +1722,18 @@ const lokiPatternItemSchema = {
     sampleCount: { type: 'number' },
     totalCount: { type: 'number' },
     samplesJson: { type: 'string' },
+  },
+} as const
+
+const lokiDetectedFieldItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    label: { type: 'string' },
+    type: { type: 'string' },
+    cardinality: { type: 'number' },
+    parsersJson: { type: 'string' },
+    jsonPath: { type: 'string' },
   },
 } as const
 
@@ -1568,6 +1779,39 @@ const grafanaFolderItemSchema = {
     uid: { type: 'string' },
     title: { type: 'string' },
     url: { type: 'string' },
+  },
+} as const
+
+const grafanaAnnotationItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    alertId: { type: 'number' },
+    dashboardUid: { type: 'string' },
+    panelId: { type: 'number' },
+    userName: { type: 'string' },
+    newState: { type: 'string' },
+    prevState: { type: 'string' },
+    time: { type: 'number' },
+    timeEnd: { type: 'number' },
+    text: { type: 'string' },
+    tagsJson: { type: 'string' },
+    dataJson: { type: 'string' },
+  },
+} as const
+
+const grafanaAlertInstanceItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    fingerprint: { type: 'string' },
+    startsAt: { type: 'string' },
+    endsAt: { type: 'string' },
+    statusJson: { type: 'string' },
+    labelsJson: { type: 'string' },
+    annotationsJson: { type: 'string' },
+    receiversJson: { type: 'string' },
   },
 } as const
 
@@ -1789,6 +2033,14 @@ function renderLokiPatterns(items: Array<Partial<LokiPatternItem>>) {
   ).join('\n'))
 }
 
+function renderLokiDetectedFields(value: { connected?: boolean; reason?: string; items?: Array<Partial<LokiDetectedFieldItem>>; limit?: number }) {
+  if (!value.connected) return text(value.reason ?? 'Loki is not configured.')
+  if (!value.items?.length) return text('No detected Loki fields found.')
+  return text(value.items.map(field =>
+    `${field.label ?? ''} ${field.type ?? ''} cardinality=${field.cardinality ?? 0} parsers=${field.parsersJson ?? '[]'}`,
+  ).join('\n'))
+}
+
 function renderGrafanaHealth(value: Partial<GrafanaHealthData> & { reason?: string }) {
   if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
   return text(`database: ${value.database ?? ''}\nversion: ${value.version ?? ''}\ncommit: ${value.commit ?? ''}\n${value.statusJson ?? ''}`)
@@ -1821,4 +2073,18 @@ function renderGrafanaDashboard(value: Partial<GrafanaDashboardData> & { reason?
 function renderGrafanaFolders(items: Array<Partial<GrafanaFolderItem>>) {
   if (!items.length) return text('No Grafana folders found.')
   return text(items.map(item => `${item.title ?? ''} ${item.url ?? ''}`).join('\n'))
+}
+
+function renderGrafanaAnnotations(items: Array<Partial<GrafanaAnnotationItem>>) {
+  if (!items.length) return text('No Grafana annotations found.')
+  return text(items.map(annotation =>
+    `${annotation.time ?? 0} ${annotation.dashboardUid ?? ''} ${annotation.text ?? ''} ${annotation.tagsJson ?? '[]'}`,
+  ).join('\n'))
+}
+
+function renderGrafanaAlertInstances(items: Array<Partial<GrafanaAlertInstanceItem>>) {
+  if (!items.length) return text('No Grafana alert instances found.')
+  return text(items.map(alert =>
+    `${alert.labelsJson ?? '{}'} status=${alert.statusJson ?? '{}'} receiver=${alert.receiversJson ?? '[]'}`,
+  ).join('\n'))
 }

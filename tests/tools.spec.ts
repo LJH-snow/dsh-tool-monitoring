@@ -29,9 +29,13 @@ describe('tool definitions', () => {
       'grafana_get_dashboard',
       'grafana_get_datasource',
       'grafana_get_health',
+      'grafana_list_alert_instances',
+      'grafana_list_annotations',
       'grafana_list_datasources',
       'grafana_list_folders',
       'grafana_search_dashboards',
+      'loki_get_detected_field_values',
+      'loki_get_detected_fields',
       'loki_get_index_stats',
       'loki_get_index_volume',
       'loki_get_index_volume_range',
@@ -272,6 +276,79 @@ describe('tool definitions', () => {
     })
     expect((await map.grafana_list_folders.execute({}, exec())).items[0].uid).toBe('folder-1')
     expect(fetchImpl.mock.calls.length).toBe(6)
+  })
+
+  it('executes Loki detected field and Grafana alert observation tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          fields: [{
+            label: 'level',
+            type: 'string',
+            cardinality: 3,
+            parsers: ['logfmt'],
+            jsonPath: '',
+          }],
+          limit: 100,
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: { values: ['debug', 'info'], limit: 50 },
+      }))
+      .mockResolvedValueOnce(json([{
+        id: 1,
+        alertId: 0,
+        dashboardUID: 'dash-1',
+        panelId: 1,
+        userId: 1,
+        userName: 'alice',
+        newState: '',
+        prevState: '',
+        time: 1507266395000,
+        timeEnd: 1507266395000,
+        text: 'deploy',
+        tags: ['prod'],
+        data: {},
+      }]))
+      .mockResolvedValueOnce(json([{
+        fingerprint: 'abc',
+        startsAt: '2026-08-28T00:00:00Z',
+        endsAt: '0001-01-01T00:00:00Z',
+        status: { state: 'active' },
+        labels: { alertname: 'HighCPU' },
+        annotations: {},
+        receivers: [{ name: 'webhook' }],
+      }]))
+    const map = tools(new MonitoringClient({
+      lokiBaseUrl: 'http://loki:3100',
+      grafanaBaseUrl: 'http://grafana:3000',
+      fetchImpl,
+    }))
+
+    expect((await map.loki_get_detected_fields.execute({
+      query: '{job="app"}',
+      start: '1700000000',
+      end: '1700003600',
+    }, exec())).items[0]).toMatchObject({ label: 'level', cardinality: 3 })
+    expect((await map.loki_get_detected_field_values.execute({
+      fieldName: 'level',
+      query: '{job="app"}',
+    }, exec())).items).toEqual(['debug', 'info'])
+    expect((await map.grafana_list_annotations.execute({
+      tagsJson: '["prod","api"]',
+      dashboardUid: 'dash-1',
+    }, exec())).items[0].text).toBe('deploy')
+    expect((await map.grafana_list_alert_instances.execute({
+      active: false,
+      receiver: 'webhook',
+    }, exec())).items[0].fingerprint).toBe('abc')
+    expect(await map.grafana_list_annotations.execute({ tagsJson: 'not-json' }, exec())).toMatchObject({
+      connected: false,
+      reason: 'tagsJson must be a valid JSON array.',
+    })
+    expect(fetchImpl.mock.calls.length).toBe(4)
   })
 
   it('keeps all write tools gated when allowWrite is not enabled', async () => {

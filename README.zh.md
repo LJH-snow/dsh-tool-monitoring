@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume 与检测到的模式，查看 Grafana 健康状态、数据源、面板与目录，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、数据源、面板、目录、注解与告警实例，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
 
 插件遵循官方「一切皆插件」架构，通过 `ctx.tools.register(defineTool(...))` 注册模型可见工具，并符合 [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) 契约。
 
@@ -82,6 +82,8 @@ Loki 工具：
 | `loki_get_index_volume` | 查看 label/series 聚合的 index volume | 否 |
 | `loki_get_index_volume_range` | 按时间范围查看 index volume matrix | 否 |
 | `loki_get_patterns` | 查看 Loki 日志中检测到的 patterns | 否 |
+| `loki_get_detected_fields` | 查看匹配日志中检测到的字段 | 否 |
+| `loki_get_detected_field_values` | 查看某个检测字段的观测值 | 否 |
 
 Grafana 工具：
 
@@ -93,6 +95,8 @@ Grafana 工具：
 | `grafana_search_dashboards` | 按 query、tag、starred、分页搜索面板 | 否 |
 | `grafana_get_dashboard` | 按 UID 查看面板 JSON、元数据与 panel 数 | 否 |
 | `grafana_list_folders` | 查看目录 UID、标题与 URL | 否 |
+| `grafana_list_annotations` | 按时间、面板、类型与 tags 查看注解 | 否 |
+| `grafana_list_alert_instances` | 查看 Grafana 管理的告警实例 | 否 |
 
 Alertmanager 工具：
 

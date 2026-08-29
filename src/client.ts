@@ -166,6 +166,14 @@ export interface LokiPatternItem {
   samplesJson: string
 }
 
+export interface LokiDetectedFieldItem {
+  label: string
+  type: string
+  cardinality: number
+  parsersJson: string
+  jsonPath: string
+}
+
 export interface GrafanaHealthData {
   connected: boolean
   database: string
@@ -215,6 +223,31 @@ export interface GrafanaFolderItem {
   uid: string
   title: string
   url: string
+}
+
+export interface GrafanaAnnotationItem {
+  id: number
+  alertId: number
+  dashboardUid: string
+  panelId: number
+  userName: string
+  newState: string
+  prevState: string
+  time: number
+  timeEnd: number
+  text: string
+  tagsJson: string
+  dataJson: string
+}
+
+export interface GrafanaAlertInstanceItem {
+  fingerprint: string
+  startsAt: string
+  endsAt: string
+  statusJson: string
+  labelsJson: string
+  annotationsJson: string
+  receiversJson: string
 }
 
 export interface AlertmanagerAlertItem {
@@ -440,6 +473,48 @@ function mapGrafanaFolder(data: unknown): GrafanaFolderItem {
     uid: asString(record, 'uid'),
     title: asString(record, 'title'),
     url: asString(record, 'url'),
+  }
+}
+
+function mapLokiDetectedField(data: unknown): LokiDetectedFieldItem {
+  const record = asRecord(data)
+  return {
+    label: asString(record, 'label'),
+    type: asString(record, 'type'),
+    cardinality: asNumber(record, 'cardinality'),
+    parsersJson: JSON.stringify(asArray(record.parsers)),
+    jsonPath: asString(record, 'jsonPath'),
+  }
+}
+
+function mapGrafanaAnnotation(data: unknown): GrafanaAnnotationItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    alertId: asNumber(record, 'alertId'),
+    dashboardUid: asString(record, 'dashboardUID') || asString(record, 'dashboardUid'),
+    panelId: asNumber(record, 'panelId'),
+    userName: asString(record, 'userName'),
+    newState: asString(record, 'newState'),
+    prevState: asString(record, 'prevState'),
+    time: asNumber(record, 'time'),
+    timeEnd: asNumber(record, 'timeEnd'),
+    text: asString(record, 'text'),
+    tagsJson: toJson(record.tags),
+    dataJson: toJson(record.data),
+  }
+}
+
+function mapGrafanaAlertInstance(data: unknown): GrafanaAlertInstanceItem {
+  const record = asRecord(data)
+  return {
+    fingerprint: asString(record, 'fingerprint'),
+    startsAt: asString(record, 'startsAt'),
+    endsAt: asString(record, 'endsAt'),
+    statusJson: toJson(record.status),
+    labelsJson: toJson(record.labels),
+    annotationsJson: toJson(record.annotations),
+    receiversJson: toJson(record.receivers),
   }
 }
 
@@ -1088,6 +1163,80 @@ export class MonitoringClient {
     return { connected: true, items: mapLokiPatterns(data) }
   }
 
+  async lokiGetDetectedFields(
+    query: string,
+    options: {
+      start?: string
+      end?: string
+      since?: string
+      step?: string
+      lineLimit?: number
+      limit?: number
+      signal?: AbortSignal
+    } = {},
+  ): Promise<{
+    connected: boolean
+    items: LokiDetectedFieldItem[]
+    limit: number
+  }> {
+    const params = [`query=${encodeURIComponent(query)}`]
+    if (options.start) params.push(`start=${encodeURIComponent(options.start)}`)
+    if (options.end) params.push(`end=${encodeURIComponent(options.end)}`)
+    if (options.since) params.push(`since=${encodeURIComponent(options.since)}`)
+    if (options.step) params.push(`step=${encodeURIComponent(options.step)}`)
+    if (options.lineLimit && options.lineLimit > 0) {
+      params.push(`line_limit=${Math.floor(options.lineLimit)}`)
+    }
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    const data = asRecord(await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/detected_fields?${params.join('&')}`,
+      undefined,
+      options.signal,
+    ))
+    const items = asArray(data.fields).map(mapLokiDetectedField)
+    return { connected: true, items, limit: asNumber(data, 'limit') }
+  }
+
+  async lokiGetDetectedFieldValues(
+    fieldName: string,
+    query: string,
+    options: {
+      start?: string
+      end?: string
+      since?: string
+      step?: string
+      lineLimit?: number
+      limit?: number
+      signal?: AbortSignal
+    } = {},
+  ): Promise<{
+    connected: boolean
+    items: string[]
+    limit: number
+  }> {
+    const params = [`query=${encodeURIComponent(query)}`]
+    if (options.start) params.push(`start=${encodeURIComponent(options.start)}`)
+    if (options.end) params.push(`end=${encodeURIComponent(options.end)}`)
+    if (options.since) params.push(`since=${encodeURIComponent(options.since)}`)
+    if (options.step) params.push(`step=${encodeURIComponent(options.step)}`)
+    if (options.lineLimit && options.lineLimit > 0) {
+      params.push(`line_limit=${Math.floor(options.lineLimit)}`)
+    }
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    const data = asRecord(await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/detected_field/${encodeURIComponent(fieldName)}/values?${params.join('&')}`,
+      undefined,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      items: mapStringItems(data.values),
+      limit: asNumber(data, 'limit'),
+    }
+  }
+
   async grafanaGetHealth(options: { signal?: AbortSignal } = {}): Promise<GrafanaHealthData> {
     const data = asRecord(await this.grafanaRequest('GET', '/api/health', options.signal))
     return {
@@ -1180,6 +1329,64 @@ export class MonitoringClient {
   }> {
     const data = await this.grafanaRequest('GET', '/api/folders', options.signal)
     const items = asArray(data).map(mapGrafanaFolder)
+    return { connected: true, items }
+  }
+
+  async grafanaListAnnotations(
+    options: {
+      from?: string
+      to?: string
+      limit?: number
+      dashboardUid?: string
+      panelId?: number
+      type?: string
+      tags?: string[]
+      signal?: AbortSignal
+    } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaAnnotationItem[]
+  }> {
+    const params: string[] = []
+    if (options.from) params.push(`from=${encodeURIComponent(options.from)}`)
+    if (options.to) params.push(`to=${encodeURIComponent(options.to)}`)
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    if (options.dashboardUid) params.push(`dashboardUID=${encodeURIComponent(options.dashboardUid)}`)
+    if (options.panelId !== undefined) params.push(`panelId=${Math.floor(options.panelId)}`)
+    if (options.type) params.push(`type=${encodeURIComponent(options.type)}`)
+    for (const tag of options.tags ?? []) {
+      if (tag) params.push(`tags=${encodeURIComponent(tag)}`)
+    }
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = await this.grafanaRequest('GET', `/api/annotations${suffix}`, options.signal)
+    const items = asArray(data).map(mapGrafanaAnnotation)
+    return { connected: true, items }
+  }
+
+  async grafanaListAlertInstances(
+    options: {
+      active?: boolean
+      silenced?: boolean
+      inhibited?: boolean
+      receiver?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaAlertInstanceItem[]
+  }> {
+    const params: string[] = []
+    if (options.active === false) params.push('active=false')
+    if (options.silenced === false) params.push('silenced=false')
+    if (options.inhibited === false) params.push('inhibited=false')
+    if (options.receiver) params.push(`receiver=${encodeURIComponent(options.receiver)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/alertmanager/grafana/api/v2/alerts${suffix}`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaAlertInstance)
     return { connected: true, items }
   }
 

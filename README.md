@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume and detected patterns, inspect Grafana health, datasources, dashboards and folders, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, datasources, dashboards, folders, annotations and alert instances, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -82,6 +82,8 @@ Loki tools:
 | `loki_get_index_volume` | Get index volume for labels or series | no |
 | `loki_get_index_volume_range` | Get index volume as a matrix over a range | no |
 | `loki_get_patterns` | Get patterns detected in Loki logs | no |
+| `loki_get_detected_fields` | Get fields detected in matching Loki log lines | no |
+| `loki_get_detected_field_values` | Get observed values for one detected Loki field | no |
 
 Grafana tools:
 
@@ -93,6 +95,8 @@ Grafana tools:
 | `grafana_search_dashboards` | Search dashboards by query, tag, starred status, limit and page | no |
 | `grafana_get_dashboard` | Get dashboard JSON, metadata and panel count by UID | no |
 | `grafana_list_folders` | List folders with UID, title and URL | no |
+| `grafana_list_annotations` | List annotations by time, dashboard, panel, type and tags | no |
+| `grafana_list_alert_instances` | List current Grafana-managed alert instances | no |
 
 Alertmanager tools:
 

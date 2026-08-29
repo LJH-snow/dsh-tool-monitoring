@@ -444,6 +444,113 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[5][0]).toBe('http://grafana:3000/api/folders')
   })
 
+  it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: {
+          fields: [{
+            label: 'level',
+            type: 'string',
+            cardinality: 3,
+            parsers: ['logfmt'],
+            jsonPath: '',
+          }],
+          limit: 100,
+        },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: { values: ['debug', 'info', 'warn'], limit: 50 },
+      }))
+      .mockResolvedValueOnce(am([{
+        id: 1124,
+        alertId: 0,
+        dashboardUID: 'dash-1',
+        panelId: 2,
+        userId: 1,
+        userName: 'alice',
+        newState: '',
+        prevState: '',
+        time: 1507266395000,
+        timeEnd: 1507266395000,
+        text: 'deploy',
+        tags: ['prod', 'api'],
+        data: { source: 'ci' },
+      }]))
+      .mockResolvedValueOnce(am([{
+        fingerprint: 'abc',
+        startsAt: '2026-08-28T00:00:00Z',
+        endsAt: '0001-01-01T00:00:00Z',
+        status: { state: 'active' },
+        labels: { alertname: 'HighCPU' },
+        annotations: { summary: 'CPU high' },
+        receivers: [{ name: 'webhook' }],
+      }]))
+    const client = new MonitoringClient({
+      lokiBaseUrl: 'http://loki:3100',
+      grafanaBaseUrl: 'http://grafana:3000',
+      fetchImpl,
+    })
+
+    expect(await client.lokiGetDetectedFields('{job="api"}', {
+      start: '1700000000',
+      end: '1700003600',
+      since: '1h',
+      step: '10s',
+      lineLimit: 20,
+      limit: 10,
+    })).toMatchObject({
+      connected: true,
+      limit: 100,
+      items: [{
+        label: 'level',
+        type: 'string',
+        cardinality: 3,
+        parsersJson: expect.stringContaining('logfmt'),
+      }],
+    })
+    expect((await client.lokiGetDetectedFieldValues('level', '{job="api"}', {
+      start: '1700000000',
+      end: '1700003600',
+      limit: 50,
+    })).items).toEqual(['debug', 'info', 'warn'])
+    expect((await client.grafanaListAnnotations({
+      from: '1500000000',
+      to: '1600000000',
+      limit: 20,
+      dashboardUid: 'dash-1',
+      panelId: 2,
+      type: 'annotation',
+      tags: ['prod', 'api'],
+    })).items[0]).toMatchObject({
+      id: 1124,
+      dashboardUid: 'dash-1',
+      text: 'deploy',
+      tagsJson: expect.stringContaining('api'),
+    })
+    expect((await client.grafanaListAlertInstances({
+      active: false,
+      receiver: 'webhook',
+    })).items[0]).toMatchObject({
+      fingerprint: 'abc',
+      labelsJson: expect.stringContaining('HighCPU'),
+    })
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://loki:3100/loki/api/v1/detected_fields?query=%7Bjob%3D%22api%22%7D&start=1700000000&end=1700003600&since=1h&step=10s&line_limit=20&limit=10',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://loki:3100/loki/api/v1/detected_field/level/values?query=%7Bjob%3D%22api%22%7D&start=1700000000&end=1700003600&limit=50',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://grafana:3000/api/annotations?from=1500000000&to=1600000000&limit=20&dashboardUID=dash-1&panelId=2&type=annotation&tags=prod&tags=api',
+    )
+    expect(fetchImpl.mock.calls[3][0]).toBe(
+      'http://grafana:3000/api/alertmanager/grafana/api/v2/alerts?active=false&receiver=webhook',
+    )
+  })
+
   it('maps Alertmanager status, alerts, groups, silences, and receivers', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(am({ versionInfo: { version: '0.27.0' }, uptime: '2026-08-28T00:00:00Z' }))

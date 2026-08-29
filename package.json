@@ -1,7 +1,7 @@
 {
   "name": "@libai168/dsh-tool-monitoring",
-  "description": "Monitoring and alerting tools for DeepSeek Harness: Prometheus, Alertmanager, Loki LogQL, Grafana dashboards and datasources, plus observability status",
-  "version": "0.4.0",
+  "description": "Monitoring and alerting tools for DeepSeek Harness: Prometheus, Alertmanager, Loki LogQL, Grafana dashboards, annotations and alerts, plus observability status",
+  "version": "0.5.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
