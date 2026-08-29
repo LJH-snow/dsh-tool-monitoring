@@ -12,6 +12,12 @@
     # alertmanagerToken: ''
     # alertmanagerUsername: ''
     # alertmanagerPassword: ''
+    # Loki 默认 http://localhost:3100
+    # lokiBaseUrl: 'http://loki:3100'
+    # lokiToken: ''
+    # lokiUsername: ''
+    # lokiPassword: ''
+    # lokiTenantId: ''
     # 写操作默认关闭;确认权限后再开启
     allowWrite: true
     timeoutMs: 15000

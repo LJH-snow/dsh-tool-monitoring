@@ -137,6 +137,82 @@ describe('MonitoringClient', () => {
     expect(requestInit(fetchImpl).method).toBe('POST')
   })
 
+  it('queries Loki ranges and maps stream results with tenant scoping', async () => {
+    const fetchImpl = vi.fn(async () => json({
+      status: 'success',
+      data: {
+        resultType: 'streams',
+        result: [{
+          stream: { app: 'api' },
+          values: [['1700000000000000000', 'hello']],
+        }],
+      },
+    }))
+    const client = new MonitoringClient({
+      lokiBaseUrl: 'http://loki:3100',
+      lokiToken: 'lokitok',
+      lokiTenantId: 'tenant-a',
+      fetchImpl,
+    })
+
+    const result = await client.lokiQueryRange('{app="api"}', {
+      start: '1700000000',
+      end: '1700003600',
+      limit: 50,
+      direction: 'forward',
+    })
+
+    expect(result).toMatchObject({ connected: true, resultType: 'streams', seriesCount: 1, entryCount: 1 })
+    expect(JSON.parse(result.resultJson)[0].stream.app).toBe('api')
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://loki:3100/loki/api/v1/query_range?query=%7Bapp%3D%22api%22%7D&start=1700000000&end=1700003600&limit=50&direction=forward',
+    )
+    expect(requestInit(fetchImpl).headers).toMatchObject({
+      authorization: 'Bearer lokitok',
+      'x-scope-orgid': 'tenant-a',
+    })
+  })
+
+  it('lists Loki labels, label values, series, index stats, and build info', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({ status: 'success', data: ['app', 'env'] }))
+      .mockResolvedValueOnce(json({ status: 'success', data: ['api', 'worker'] }))
+      .mockResolvedValueOnce(json({ status: 'success', data: [{ app: 'api' }, { app: 'worker' }] }))
+      .mockResolvedValueOnce(am({ streams: 100, chunks: 1000, entries: 5000, bytes: 100000 }))
+      .mockResolvedValueOnce(am({
+        version: '3.4.0',
+        revision: 'abc123',
+        branch: 'main',
+        buildDate: '2026-08-28',
+        buildUser: 'builder',
+        goVersion: 'go1.23',
+      }))
+    const client = new MonitoringClient({ lokiBaseUrl: 'http://loki:3100', fetchImpl })
+
+    expect((await client.lokiListLabels({ query: '{app="api"}' })).items).toEqual(['app', 'env'])
+    expect((await client.lokiGetLabelValues('env')).items).toEqual(['api', 'worker'])
+    expect((await client.lokiListSeries(['{app="api"}', '{job="loki"}'])).items).toHaveLength(2)
+    expect(await client.lokiGetIndexStats('{app="api"}')).toMatchObject({
+      streams: 100,
+      chunks: 1000,
+      entries: 5000,
+      bytes: 100000,
+    })
+    expect(await client.lokiGetStatus()).toMatchObject({ connected: true, version: '3.4.0', goVersion: 'go1.23' })
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://loki:3100/loki/api/v1/labels?query=%7Bapp%3D%22api%22%7D',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://loki:3100/loki/api/v1/label/env/values')
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://loki:3100/loki/api/v1/series?match[]=%7Bapp%3D%22api%22%7D&match[]=%7Bjob%3D%22loki%22%7D',
+    )
+    expect(fetchImpl.mock.calls[3][0]).toBe(
+      'http://loki:3100/loki/api/v1/index/stats?query=%7Bapp%3D%22api%22%7D',
+    )
+    expect(fetchImpl.mock.calls[4][0]).toBe('http://loki:3100/loki/api/v1/status/buildinfo')
+  })
+
   it('maps Alertmanager status, alerts, groups, silences, and receivers', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(am({ versionInfo: { version: '0.27.0' }, uptime: '2026-08-28T00:00:00Z' }))

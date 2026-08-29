@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，并管理 Alertmanager 的告警、告警分组、静默与接收人。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series 与 index 统计，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
 
 插件遵循官方「一切皆插件」架构，通过 `ctx.tools.register(defineTool(...))` 注册模型可见工具，并符合 [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) 契约。
 
@@ -33,13 +33,16 @@ npm install github:LJH-snow/dsh-tool-monitoring
     prometheusToken: 'plain_token_or_Bearer_token'    # 可选
     alertmanagerBaseUrl: 'http://alertmanager:9093'   # 可选，默认 http://localhost:9093
     alertmanagerToken: 'plain_token_or_Bearer_token'  # 可选
+    lokiBaseUrl: 'http://loki:3100'                   # 可选，默认 http://localhost:3100
+    lokiToken: 'plain_token_or_Bearer_token'          # 可选
+    lokiTenantId: 'tenant-a'                          # 可选，仅多租户 Loki 需要
     timeoutMs: 15000                                  # 可选，默认 15000
     allowWrite: false                                 # 可选，写工具默认关闭
 ```
 
 完整示例见 [examples/cordis.yml](examples/cordis.yml)。
 
-两个组件都支持 Token 或 Basic Auth：Prometheus 使用 `prometheusToken`/`prometheusUsername`/`prometheusPassword`，Alertmanager 使用 `alertmanagerToken`/`alertmanagerUsername`/`alertmanagerPassword`。将 base URL 配置为空字符串可禁用对应组件，此时读工具返回明确的 `{ connected: false, reason }`。
+三个组件都支持 Token 或 Basic Auth：Prometheus 使用 `prometheusToken`/`prometheusUsername`/`prometheusPassword`，Alertmanager 使用 `alertmanagerToken`/`alertmanagerUsername`/`alertmanagerPassword`，Loki 使用 `lokiToken`/`lokiUsername`/`lokiPassword`。将 base URL 配置为空字符串可禁用对应组件，此时读工具返回明确的 `{ connected: false, reason }`。多租户 Loki 可额外配置 `lokiTenantId`。
 
 > 安全说明：写工具由 `allowWrite` 控制。除非允许 dsh 删除 Prometheus 序列、创建或删除 Alertmanager 静默、发送告警，否则保持关闭。
 
@@ -60,6 +63,18 @@ Prometheus 工具：
 | `prometheus_get_tsdb_status` | 查看 TSDB 基线与 head block 统计 | 否 |
 | `prometheus_delete_series` | 按 PromQL selector 删除序列 | 是 |
 
+Loki 工具：
+
+| 工具 | 说明 | 写操作 |
+|---|---|---|
+| `loki_query` | 运行 LogQL 即时查询 | 否 |
+| `loki_query_range` | 按时间范围查询日志或指标流 | 否 |
+| `loki_list_labels` | 可选按 selector 和时间范围查看 label 名 | 否 |
+| `loki_get_label_values` | 查看某个 label 的值 | 否 |
+| `loki_list_series` | 按 LogQL selector 查找 streams | 否 |
+| `loki_get_index_stats` | 查看 streams/chunks/entries/bytes 索引统计 | 否 |
+| `loki_get_status` | 查看 Loki 构建信息 | 否 |
+
 Alertmanager 工具：
 
 | 工具 | 说明 | 写操作 |
@@ -77,7 +92,7 @@ Alertmanager 工具：
 
 - 未配置组件 base URL 时，读工具返回 `{ connected: false, reason }`。
 - `allowWrite` 关闭或监控服务返回校验错误时，写工具返回 `{ ok: false, reason }`。
-- Prometheus API 层错误和写操作 HTTP 400 映射为业务失败值。
+- Prometheus/Loki API 层错误和写操作 HTTP 400 映射为业务失败值。
 - 凭据无效（401）、访问禁止（403）、限流（429）、服务器错误（5xx）等基础设施错误直接抛出 `MonitoringError`。
 - 每个请求都透传 `exec.signal`，并使用可配置超时（默认 15 秒）。
 

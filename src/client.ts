@@ -1,4 +1,4 @@
-/** Minimal Prometheus and Alertmanager HTTP clients with injected fetch for testability. */
+/** Minimal Prometheus, Alertmanager, and Loki HTTP clients with injected fetch for testability. */
 
 export interface MonitoringClientOptions {
   /** Prometheus HTTP API base URL, default http://localhost:9090. */
@@ -13,6 +13,14 @@ export interface MonitoringClientOptions {
   alertmanagerToken?: string
   alertmanagerUsername?: string
   alertmanagerPassword?: string
+  /** Loki HTTP API base URL, default http://localhost:3100. */
+  lokiBaseUrl?: string
+  /** Loki bearer token. Used directly when the value already starts with "Bearer ". */
+  lokiToken?: string
+  lokiUsername?: string
+  lokiPassword?: string
+  /** Optional Loki tenant ID for multi-tenant deployments. */
+  lokiTenantId?: string
   /** Request timeout in milliseconds. 0 disables the timeout. */
   timeoutMs?: number
   /** Write tools stay disabled unless this is true. */
@@ -74,6 +82,42 @@ export interface PrometheusTsdbData {
   statsJson: string
 }
 
+export interface LokiQueryData {
+  connected: boolean
+  resultType: string
+  seriesCount: number
+  entryCount: number
+  resultJson: string
+}
+
+export interface LokiLabelData {
+  connected: boolean
+  items: string[]
+}
+
+export interface LokiSeriesItem {
+  labelsJson: string
+}
+
+export interface LokiIndexStats {
+  connected: boolean
+  streams: number
+  chunks: number
+  entries: number
+  bytes: number
+  statsJson: string
+}
+
+export interface LokiStatusData {
+  connected: boolean
+  version: string
+  revision: string
+  branch: string
+  buildDate: string
+  goVersion: string
+  statusJson: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -121,7 +165,7 @@ export class MonitoringError extends Error {
   }
 }
 
-type Component = 'prometheus' | 'alertmanager'
+type Component = 'prometheus' | 'alertmanager' | 'loki'
 type HttpMethod = 'GET' | 'POST' | 'DELETE'
 
 interface ComponentOptions {
@@ -129,6 +173,7 @@ interface ComponentOptions {
   token?: string
   username?: string
   password?: string
+  tenantId?: string
 }
 
 interface PrometheusData {
@@ -184,6 +229,26 @@ function mapQueryData(data: unknown): PrometheusQueryData {
   }
 }
 
+function mapStringItems(data: unknown): string[] {
+  return asArray(data).map(value => typeof value === 'string' ? value : String(value ?? ''))
+}
+
+function mapLokiQueryData(data: unknown): LokiQueryData {
+  const record = asRecord(data)
+  const result = asArray(record.result)
+  const entryCount = result.reduce((count: number, rawItem) => {
+    const item = asRecord(rawItem)
+    return count + asArray(item.values).length
+  }, 0)
+  return {
+    connected: true,
+    resultType: asString(record, 'resultType'),
+    seriesCount: result.length,
+    entryCount,
+    resultJson: JSON.stringify(result),
+  }
+}
+
 function mapTarget(data: unknown): PrometheusTargetItem {
   const record = asRecord(data)
   return {
@@ -197,6 +262,7 @@ function mapTarget(data: unknown): PrometheusTargetItem {
 export class MonitoringClient {
   private readonly prometheus: ComponentOptions
   private readonly alertmanager: ComponentOptions
+  private readonly loki: ComponentOptions
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
   private readonly allowWrite: boolean
@@ -214,6 +280,13 @@ export class MonitoringClient {
       username: options.alertmanagerUsername,
       password: options.alertmanagerPassword,
     }
+    this.loki = {
+      baseUrl: (options.lokiBaseUrl ?? 'http://localhost:3100').replace(/\/+$/, ''),
+      token: options.lokiToken,
+      username: options.lokiUsername,
+      password: options.lokiPassword,
+      tenantId: options.lokiTenantId,
+    }
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch
     this.timeoutMs = options.timeoutMs ?? 15_000
     this.allowWrite = options.allowWrite ?? false
@@ -227,6 +300,10 @@ export class MonitoringClient {
     return this.alertmanager.baseUrl.length > 0
   }
 
+  hasLoki(): boolean {
+    return this.loki.baseUrl.length > 0
+  }
+
   private combinedSignal(signal?: AbortSignal): AbortSignal | undefined {
     if (this.timeoutMs <= 0) return signal
     const timeout = AbortSignal.timeout(this.timeoutMs)
@@ -234,7 +311,9 @@ export class MonitoringClient {
   }
 
   private headers(component: Component): Record<string, string> {
-    const options = component === 'prometheus' ? this.prometheus : this.alertmanager
+    const options = component === 'prometheus'
+      ? this.prometheus
+      : component === 'loki' ? this.loki : this.alertmanager
     const headers: Record<string, string> = {
       accept: 'application/json',
       'user-agent': 'dsh-tool-monitoring',
@@ -246,6 +325,7 @@ export class MonitoringClient {
     } else if (options.username || options.password) {
       headers.authorization = `Basic ${Buffer.from(`${options.username ?? ''}:${options.password ?? ''}`).toString('base64')}`
     }
+    if (options.tenantId) headers['x-scope-orgid'] = options.tenantId
     return headers
   }
 
@@ -256,7 +336,9 @@ export class MonitoringClient {
     body?: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    const options = component === 'prometheus' ? this.prometheus : this.alertmanager
+    const options = component === 'prometheus'
+      ? this.prometheus
+      : component === 'loki' ? this.loki : this.alertmanager
     const response = await this.fetchImpl(`${options.baseUrl}${path}`, {
       method,
       headers: this.headers(component),
@@ -272,7 +354,8 @@ export class MonitoringClient {
     }
 
     if (!response.ok) {
-      const message = asString(asRecord(payload), 'message') || `HTTP ${response.status}`
+      const payloadRecord = asRecord(payload)
+      const message = asString(payloadRecord, 'message') || asString(payloadRecord, 'error') || `HTTP ${response.status}`
       throw new MonitoringError(message, response.status)
     }
     return payload
@@ -302,6 +385,23 @@ export class MonitoringClient {
     signal?: AbortSignal,
   ): Promise<unknown> {
     return this.request('alertmanager', method, path, body, signal)
+  }
+
+  private async lokiRequest(
+    method: HttpMethod,
+    path: string,
+    body?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const payload = await this.request('loki', method, path, body, signal)
+    const record = asRecord(payload)
+    if (record.status === 'error') {
+      const errorType = asString(record, 'errorType')
+      const message = asString(record, 'error') || asString(record, 'message') || 'Loki API error'
+      throw new MonitoringError(errorType ? `${errorType}: ${message}` : message, 400)
+    }
+    if (record.status === 'success' && 'data' in record) return record.data
+    return payload
   }
 
   async query(
@@ -431,6 +531,161 @@ export class MonitoringClient {
       connected: true,
       headSeriesCount: asNumber(headStats, 'numSeries'),
       statsJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async lokiQuery(
+    query: string,
+    options: {
+      time?: string
+      limit?: number
+      direction?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<LokiQueryData> {
+    const params = [`query=${encodeURIComponent(query)}`]
+    if (options.time) params.push(`time=${encodeURIComponent(options.time)}`)
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    if (options.direction) params.push(`direction=${encodeURIComponent(options.direction)}`)
+    const data = await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/query?${params.join('&')}`,
+      undefined,
+      options.signal,
+    )
+    return mapLokiQueryData(data)
+  }
+
+  async lokiQueryRange(
+    query: string,
+    options: {
+      start?: string
+      end?: string
+      step?: string
+      limit?: number
+      direction?: string
+      interval?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<LokiQueryData> {
+    const params = [`query=${encodeURIComponent(query)}`]
+    if (options.start) params.push(`start=${encodeURIComponent(options.start)}`)
+    if (options.end) params.push(`end=${encodeURIComponent(options.end)}`)
+    if (options.step) params.push(`step=${encodeURIComponent(options.step)}`)
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    if (options.direction) params.push(`direction=${encodeURIComponent(options.direction)}`)
+    if (options.interval) params.push(`interval=${encodeURIComponent(options.interval)}`)
+    const data = await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/query_range?${params.join('&')}`,
+      undefined,
+      options.signal,
+    )
+    return mapLokiQueryData(data)
+  }
+
+  async lokiListLabels(
+    options: {
+      query?: string
+      start?: string
+      end?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<LokiLabelData> {
+    const params: string[] = []
+    if (options.query) params.push(`query=${encodeURIComponent(options.query)}`)
+    if (options.start) params.push(`start=${encodeURIComponent(options.start)}`)
+    if (options.end) params.push(`end=${encodeURIComponent(options.end)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = await this.lokiRequest('GET', `/loki/api/v1/labels${suffix}`, undefined, options.signal)
+    return { connected: true, items: mapStringItems(data) }
+  }
+
+  async lokiGetLabelValues(
+    labelName: string,
+    options: {
+      query?: string
+      start?: string
+      end?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<LokiLabelData> {
+    const params: string[] = []
+    if (options.query) params.push(`query=${encodeURIComponent(options.query)}`)
+    if (options.start) params.push(`start=${encodeURIComponent(options.start)}`)
+    if (options.end) params.push(`end=${encodeURIComponent(options.end)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/label/${encodeURIComponent(labelName)}/values${suffix}`,
+      undefined,
+      options.signal,
+    )
+    return { connected: true, items: mapStringItems(data) }
+  }
+
+  async lokiListSeries(
+    matches: string[],
+    options: {
+      start?: string
+      end?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<{
+    connected: boolean
+    items: LokiSeriesItem[]
+  }> {
+    if (matches.length === 0) return { connected: true, items: [] }
+    const params = matches.map(match => `match[]=${encodeURIComponent(match)}`)
+    if (options.start) params.push(`start=${encodeURIComponent(options.start)}`)
+    if (options.end) params.push(`end=${encodeURIComponent(options.end)}`)
+    const data = await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/series?${params.join('&')}`,
+      undefined,
+      options.signal,
+    )
+    const items = asArray(data).map(series => ({ labelsJson: toJson(series) }))
+    return { connected: true, items }
+  }
+
+  async lokiGetIndexStats(
+    query: string,
+    options: {
+      start?: string
+      end?: string
+      signal?: AbortSignal
+    } = {},
+  ): Promise<LokiIndexStats> {
+    const params = [`query=${encodeURIComponent(query)}`]
+    if (options.start) params.push(`start=${encodeURIComponent(options.start)}`)
+    if (options.end) params.push(`end=${encodeURIComponent(options.end)}`)
+    const data = asRecord(await this.lokiRequest(
+      'GET',
+      `/loki/api/v1/index/stats?${params.join('&')}`,
+      undefined,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      streams: asNumber(data, 'streams'),
+      chunks: asNumber(data, 'chunks'),
+      entries: asNumber(data, 'entries'),
+      bytes: asNumber(data, 'bytes'),
+      statsJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async lokiGetStatus(options: { signal?: AbortSignal } = {}): Promise<LokiStatusData> {
+    const data = asRecord(await this.lokiRequest('GET', '/loki/api/v1/status/buildinfo', undefined, options.signal))
+    return {
+      connected: true,
+      version: asString(data, 'version'),
+      revision: asString(data, 'revision'),
+      branch: asString(data, 'branch'),
+      buildDate: asString(data, 'buildDate'),
+      goVersion: asString(data, 'goVersion'),
+      statusJson: JSON.stringify(data ?? {}),
     }
   }
 

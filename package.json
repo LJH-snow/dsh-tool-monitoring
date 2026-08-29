@@ -1,7 +1,7 @@
 {
   "name": "@libai168/dsh-tool-monitoring",
-  "description": "Monitoring and alerting tools for DeepSeek Harness: Prometheus queries, targets, alerts, rules, label discovery, TSDB status, and Alertmanager silences, alerts, and receivers",
-  "version": "0.1.0",
+  "description": "Monitoring and alerting tools for DeepSeek Harness: Prometheus, Alertmanager, and Loki LogQL queries, labels, series, and observability status",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -46,6 +46,8 @@
     "cordis",
     "prometheus",
     "alertmanager",
+    "loki",
+    "logql",
     "monitoring",
     "alerts",
     "observability",

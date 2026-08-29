@@ -26,6 +26,13 @@ describe('tool definitions', () => {
       'alertmanager_list_receivers',
       'alertmanager_list_silences',
       'alertmanager_send_alerts',
+      'loki_get_index_stats',
+      'loki_get_label_values',
+      'loki_get_status',
+      'loki_list_labels',
+      'loki_list_series',
+      'loki_query',
+      'loki_query_range',
       'prometheus_delete_series',
       'prometheus_get_label_values',
       'prometheus_get_tsdb_status',
@@ -43,6 +50,7 @@ describe('tool definitions', () => {
     const client = new MonitoringClient({
       prometheusBaseUrl: '',
       alertmanagerBaseUrl: '',
+      lokiBaseUrl: '',
       fetchImpl: vi.fn(),
     })
     const map = tools(client)
@@ -54,6 +62,10 @@ describe('tool definitions', () => {
     expect(await map.alertmanager_list_alerts.execute({}, exec())).toMatchObject({
       connected: false,
       reason: 'Alertmanager base URL is not configured.',
+    })
+    expect(await map.loki_query.execute({ query: '{job="app"}' }, exec())).toMatchObject({
+      connected: false,
+      reason: 'Loki base URL is not configured.',
     })
   })
 
@@ -67,6 +79,30 @@ describe('tool definitions', () => {
 
     expect(result).toMatchObject({ connected: true, resultType: 'vector', seriesCount: 1 })
     expect(fetchImpl.mock.calls[0][0]).toBe('http://prom:9090/api/v1/query?query=up')
+  })
+
+  it('executes a Loki query range and forwards the request', async () => {
+    const fetchImpl = vi.fn(async () => json({
+      status: 'success',
+      data: {
+        resultType: 'streams',
+        result: [{
+          stream: { app: 'api' },
+          values: [['1700000000000000000', 'hello']],
+        }],
+      },
+    }))
+    const map = tools(new MonitoringClient({ lokiBaseUrl: 'http://loki:3100', fetchImpl }))
+    const result = await map.loki_query_range.execute({
+      query: '{app="api"}',
+      start: '1700000000',
+      end: '1700003600',
+    }, exec())
+
+    expect(result).toMatchObject({ connected: true, resultType: 'streams', seriesCount: 1, entryCount: 1 })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://loki:3100/loki/api/v1/query_range?query=%7Bapp%3D%22api%22%7D&start=1700000000&end=1700003600',
+    )
   })
 
   it('keeps all write tools gated when allowWrite is not enabled', async () => {
@@ -109,6 +145,24 @@ describe('tool definitions', () => {
     })
   })
 
+  it('validates Loki series selector JSON and renders Loki results', async () => {
+    const map = tools()
+
+    expect(await map.loki_list_series.execute({ matchesJson: 'not-json' }, exec())).toMatchObject({
+      connected: false,
+      reason: 'matchesJson must be a valid JSON array.',
+    })
+
+    const queryRender = await (map.loki_query.output as { render: (a: unknown, v: any) => unknown }).render({}, {
+      connected: true,
+      resultType: 'streams',
+      seriesCount: 1,
+      entryCount: 1,
+      resultJson: '[]',
+    })
+    expect(JSON.stringify(queryRender)).toContain('1 stream(s), 1 entries')
+  })
+
   it('renders query and alert lists into readable text', async () => {
     const map = tools()
     const queryRender = await (map.prometheus_query.output as { render: (a: unknown, v: any) => unknown }).render({}, {
@@ -139,6 +193,7 @@ describe('tool definitions', () => {
       createdBy: 'bot',
       comment: 'maintenance',
     })).toMatchObject({ kind: 'edit' })
+    expect(map.loki_query.presentCall!({ query: '{app="api"}' })).toMatchObject({ kind: 'search' })
     expect(map.alertmanager_delete_silence.presentResult!({ silenceId: 'sil-1' }, { ok: true })).toMatchObject({
       title: 'Silence deleted',
     })

@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series and index statistics, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -33,13 +33,16 @@ Load the plugin in a dsh composition config (`cordis.yml`):
     prometheusToken: 'plain_token_or_Bearer_token'    # optional
     alertmanagerBaseUrl: 'http://alertmanager:9093'   # optional, default http://localhost:9093
     alertmanagerToken: 'plain_token_or_Bearer_token'  # optional
+    lokiBaseUrl: 'http://loki:3100'                   # optional, default http://localhost:3100
+    lokiToken: 'plain_token_or_Bearer_token'          # optional
+    lokiTenantId: 'tenant-a'                          # optional, multi-tenant Loki only
     timeoutMs: 15000                                  # optional, default 15000
     allowWrite: false                                 # optional, write tools are disabled by default
 ```
 
 Full example: [examples/cordis.yml](examples/cordis.yml).
 
-Each component can also use HTTP Basic Auth with `prometheusUsername`/`prometheusPassword` or `alertmanagerUsername`/`alertmanagerPassword`. Set a base URL to an empty string to disable that component and return an explicit `connected: false` business value.
+Each component can also use HTTP Basic Auth with `prometheusUsername`/`prometheusPassword`, `alertmanagerUsername`/`alertmanagerPassword`, or `lokiUsername`/`lokiPassword`. Set a base URL to an empty string to disable that component and return an explicit `connected: false` business value.
 
 > Security: write tools are gated by `allowWrite`. Keep it `false` unless the dsh runtime is explicitly allowed to delete Prometheus series, create or delete Alertmanager silences, or send alerts.
 
@@ -60,6 +63,18 @@ Prometheus tools:
 | `prometheus_get_tsdb_status` | Read TSDB cardinality and head block statistics | no |
 | `prometheus_delete_series` | Delete series matching PromQL selectors | yes |
 
+Loki tools:
+
+| Tool | Description | Write |
+|---|---|---|
+| `loki_query` | Run a LogQL instant query | no |
+| `loki_query_range` | Query Loki logs or metric streams over a range | no |
+| `loki_list_labels` | List label names, optionally by selector and time range | no |
+| `loki_get_label_values` | List values for one label | no |
+| `loki_list_series` | Find streams matching LogQL selectors | no |
+| `loki_get_index_stats` | Read index statistics for streams, chunks, entries and bytes | no |
+| `loki_get_status` | Read Loki build information | no |
+
 Alertmanager tools:
 
 | Tool | Description | Write |
@@ -77,7 +92,7 @@ Alertmanager tools:
 
 - If a component base URL is not configured, read tools return `{ connected: false, reason }`.
 - Write tools return `{ ok: false, reason }` when `allowWrite` is disabled or when the monitoring service rejects the request with a validation error.
-- Prometheus API-level errors and HTTP 400 write validation errors are mapped to business failure values.
+- Prometheus and Loki API-level errors plus HTTP 400 write validation errors are mapped to business failure values.
 - Infrastructure errors such as invalid credentials (401), forbidden access (403), rate limiting (429), or server failures (5xx) throw `MonitoringError`.
 - Every request forwards `exec.signal` and uses a configurable timeout (default 15 seconds).
 
