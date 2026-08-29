@@ -26,6 +26,12 @@ describe('tool definitions', () => {
       'alertmanager_list_receivers',
       'alertmanager_list_silences',
       'alertmanager_send_alerts',
+      'grafana_get_dashboard',
+      'grafana_get_datasource',
+      'grafana_get_health',
+      'grafana_list_datasources',
+      'grafana_list_folders',
+      'grafana_search_dashboards',
       'loki_get_index_stats',
       'loki_get_index_volume',
       'loki_get_index_volume_range',
@@ -57,6 +63,7 @@ describe('tool definitions', () => {
       prometheusBaseUrl: '',
       alertmanagerBaseUrl: '',
       lokiBaseUrl: '',
+      grafanaBaseUrl: '',
       fetchImpl: vi.fn(),
     })
     const map = tools(client)
@@ -72,6 +79,10 @@ describe('tool definitions', () => {
     expect(await map.loki_query.execute({ query: '{job="app"}' }, exec())).toMatchObject({
       connected: false,
       reason: 'Loki base URL is not configured.',
+    })
+    expect(await map.grafana_get_health.execute({}, exec())).toMatchObject({
+      connected: false,
+      reason: 'Grafana base URL is not configured.',
     })
   })
 
@@ -188,6 +199,78 @@ describe('tool definitions', () => {
       start: '1711839260',
       end: '1711839280',
     }, exec())).items[0].totalCount).toBe(3)
+    expect(fetchImpl.mock.calls.length).toBe(6)
+  })
+
+  it('executes Grafana read tools and forwards requests', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({ database: 'ok', version: '11.2.0', commit: 'abc123' }))
+      .mockResolvedValueOnce(json([{
+        id: 1,
+        uid: 'ds-1',
+        name: 'Prometheus',
+        type: 'prometheus',
+        url: 'http://prom:9090',
+        access: 'proxy',
+        isDefault: true,
+        basicAuth: false,
+        withCredentials: false,
+        database: '',
+        user: '',
+      }]))
+      .mockResolvedValueOnce(json({
+        id: 1,
+        uid: 'ds-1',
+        name: 'Prometheus',
+        type: 'prometheus',
+        url: 'http://prom:9090',
+        access: 'proxy',
+        isDefault: true,
+        basicAuth: false,
+        withCredentials: false,
+        database: '',
+        user: '',
+      }))
+      .mockResolvedValueOnce(json([{
+        id: 10,
+        uid: 'dash-1',
+        title: 'Overview',
+        url: '/d/dash-1/overview',
+        type: 'dash-db',
+        tags: ['prod'],
+        isStarred: false,
+        folderUid: 'folder-1',
+        folderTitle: 'Ops',
+      }]))
+      .mockResolvedValueOnce(json({
+        dashboard: {
+          uid: 'dash-1',
+          title: 'Overview',
+          url: '/d/dash-1/overview',
+          panels: [{ id: 1 }],
+        },
+        meta: { url: '/d/dash-1/overview' },
+      }))
+      .mockResolvedValueOnce(json([{
+        id: 1,
+        uid: 'folder-1',
+        title: 'Ops',
+        url: '/dashboards/f/folder-1/ops',
+      }]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect(await map.grafana_get_health.execute({}, exec())).toMatchObject({
+      connected: true,
+      version: '11.2.0',
+    })
+    expect((await map.grafana_list_datasources.execute({}, exec())).items).toHaveLength(1)
+    expect((await map.grafana_get_datasource.execute({ uid: 'ds-1' }, exec())).item.name).toBe('Prometheus')
+    expect((await map.grafana_search_dashboards.execute({ query: 'prod' }, exec())).items[0].uid).toBe('dash-1')
+    expect(await map.grafana_get_dashboard.execute({ uid: 'dash-1' }, exec())).toMatchObject({
+      connected: true,
+      panelCount: 1,
+    })
+    expect((await map.grafana_list_folders.execute({}, exec())).items[0].uid).toBe('folder-1')
     expect(fetchImpl.mock.calls.length).toBe(6)
   })
 

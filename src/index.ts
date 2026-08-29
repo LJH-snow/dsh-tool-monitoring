@@ -7,6 +7,11 @@ import {
   type AlertmanagerAlertItem,
   type AlertmanagerGroupItem,
   type AlertmanagerSilenceItem,
+  type GrafanaDashboardData,
+  type GrafanaDashboardSummaryItem,
+  type GrafanaDatasourceItem,
+  type GrafanaFolderItem,
+  type GrafanaHealthData,
   type LokiAlertItem,
   type LokiIndexStats,
   type LokiPatternItem,
@@ -37,6 +42,10 @@ export interface MonitoringPluginConfig {
   lokiUsername?: string
   lokiPassword?: string
   lokiTenantId?: string
+  grafanaBaseUrl?: string
+  grafanaToken?: string
+  grafanaUsername?: string
+  grafanaPassword?: string
   timeoutMs?: number
   allowWrite?: boolean
 }
@@ -1263,6 +1272,220 @@ export function createTools(client: MonitoringClient) {
         })
       },
     }),
+
+    defineTool({
+      name: 'grafana_get_health',
+      description: 'Get Grafana health, database status, version, and commit information.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            database: { type: 'string' },
+            version: { type: 'string' },
+            commit: { type: 'string' },
+            statusJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderGrafanaHealth(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana health', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; version?: string }
+        return { card: 'generic', title: v.connected ? `Grafana ${v.version ?? ''}` : 'Grafana unavailable' }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetHealth({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_datasources',
+      description: 'List Grafana datasources with safe connection metadata and URL.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaDatasourceItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaDatasources(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana datasources', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} datasource(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListDatasources({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_datasource',
+      description: 'Get one Grafana datasource by UID with safe connection metadata.',
+      parameters: {
+        uid: { type: 'string', required: true, description: 'Grafana datasource UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaDatasourceItemSchema,
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaDatasource(value.item)
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana datasource ${args.uid}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { name?: string } }
+        return { card: 'generic', title: v.connected ? `Datasource ${v.item?.name ?? ''}` : 'Grafana unavailable' }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetDatasource(args.uid as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_search_dashboards',
+      description: 'Search Grafana dashboards by query, tag, starred status, limit, and page.',
+      parameters: {
+        query: { type: 'string', description: 'Optional dashboard title search query' },
+        tag: { type: 'string', description: 'Optional dashboard tag filter' },
+        starred: { type: 'boolean', description: 'Optional flag to return only starred dashboards' },
+        limit: { type: 'integer', description: 'Maximum results, default 1000' },
+        page: { type: 'integer', description: 'Page number for results beyond the limit' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaDashboardSummaryItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaDashboards(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana dashboards ${args.query ?? ''}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} dashboard(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaSearchDashboards({
+          query: args.query,
+          tag: args.tag,
+          starred: args.starred,
+          limit: args.limit,
+          page: args.page,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_dashboard',
+      description: 'Get a full Grafana dashboard by UID with panel count and dashboard JSON.',
+      parameters: {
+        uid: { type: 'string', required: true, description: 'Grafana dashboard UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            uid: { type: 'string' },
+            title: { type: 'string' },
+            url: { type: 'string' },
+            panelCount: { type: 'number' },
+            dashboardJson: { type: 'string' },
+            metaJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderGrafanaDashboard(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana dashboard ${args.uid}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; title?: string; panelCount?: number }
+        return { card: 'generic', title: v.connected ? `${v.title ?? ''} (${v.panelCount ?? 0} panels)` : 'Grafana unavailable' }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetDashboard(args.uid as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_folders',
+      description: 'List Grafana folders with UID, title, and URL.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaFolderItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaFolders(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana folders', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} folder(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListFolders({ signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -1300,6 +1523,51 @@ const lokiPatternItemSchema = {
     sampleCount: { type: 'number' },
     totalCount: { type: 'number' },
     samplesJson: { type: 'string' },
+  },
+} as const
+
+const grafanaDatasourceItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    uid: { type: 'string' },
+    name: { type: 'string' },
+    type: { type: 'string' },
+    url: { type: 'string' },
+    access: { type: 'string' },
+    isDefault: { type: 'boolean' },
+    basicAuth: { type: 'boolean' },
+    withCredentials: { type: 'boolean' },
+    database: { type: 'string' },
+    user: { type: 'string' },
+  },
+} as const
+
+const grafanaDashboardSummaryItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    uid: { type: 'string' },
+    title: { type: 'string' },
+    url: { type: 'string' },
+    type: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    isStarred: { type: 'boolean' },
+    folderUid: { type: 'string' },
+    folderTitle: { type: 'string' },
+  },
+} as const
+
+const grafanaFolderItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    uid: { type: 'string' },
+    title: { type: 'string' },
+    url: { type: 'string' },
   },
 } as const
 
@@ -1519,4 +1787,38 @@ function renderLokiPatterns(items: Array<Partial<LokiPatternItem>>) {
   return text(items.map(pattern =>
     `${pattern.pattern ?? ''} samples=${pattern.sampleCount ?? 0} total=${pattern.totalCount ?? 0}`,
   ).join('\n'))
+}
+
+function renderGrafanaHealth(value: Partial<GrafanaHealthData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  return text(`database: ${value.database ?? ''}\nversion: ${value.version ?? ''}\ncommit: ${value.commit ?? ''}\n${value.statusJson ?? ''}`)
+}
+
+function renderGrafanaDatasource(item?: Partial<GrafanaDatasourceItem>) {
+  if (!item?.name) return text('No Grafana datasource found.')
+  return text(`${item.name} (${item.type ?? 'unknown'})\nurl: ${item.url ?? ''}\naccess: ${item.access ?? ''}\ndefault: ${item.isDefault ? 'yes' : 'no'}`)
+}
+
+function renderGrafanaDatasources(items: Array<Partial<GrafanaDatasourceItem>>) {
+  if (!items.length) return text('No Grafana datasources found.')
+  return text(items.map(item =>
+    `${item.name ?? ''} (${item.type ?? 'unknown'}) ${item.url ?? ''} default=${item.isDefault ? 'yes' : 'no'}`,
+  ).join('\n'))
+}
+
+function renderGrafanaDashboards(items: Array<Partial<GrafanaDashboardSummaryItem>>) {
+  if (!items.length) return text('No Grafana dashboards found.')
+  return text(items.map(item =>
+    `${item.title ?? ''} ${item.url ?? ''}${item.folderTitle ? ` folder=${item.folderTitle}` : ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaDashboard(value: Partial<GrafanaDashboardData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  return text(`${value.title ?? ''} ${value.url ?? ''}\npanels: ${value.panelCount ?? 0}\n${value.dashboardJson ?? ''}`)
+}
+
+function renderGrafanaFolders(items: Array<Partial<GrafanaFolderItem>>) {
+  if (!items.length) return text('No Grafana folders found.')
+  return text(items.map(item => `${item.title ?? ''} ${item.url ?? ''}`).join('\n'))
 }

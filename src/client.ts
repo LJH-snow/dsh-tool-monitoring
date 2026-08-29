@@ -1,4 +1,4 @@
-/** Minimal Prometheus, Alertmanager, and Loki HTTP clients with injected fetch for testability. */
+/** Minimal Prometheus, Alertmanager, Loki, and Grafana HTTP clients with injected fetch for testability. */
 
 export interface MonitoringClientOptions {
   /** Prometheus HTTP API base URL, default http://localhost:9090. */
@@ -21,6 +21,12 @@ export interface MonitoringClientOptions {
   lokiPassword?: string
   /** Optional Loki tenant ID for multi-tenant deployments. */
   lokiTenantId?: string
+  /** Grafana HTTP API base URL, default http://localhost:3000. */
+  grafanaBaseUrl?: string
+  /** Grafana bearer token. Used directly when the value already starts with "Bearer ". */
+  grafanaToken?: string
+  grafanaUsername?: string
+  grafanaPassword?: string
   /** Request timeout in milliseconds. 0 disables the timeout. */
   timeoutMs?: number
   /** Write tools stay disabled unless this is true. */
@@ -160,6 +166,57 @@ export interface LokiPatternItem {
   samplesJson: string
 }
 
+export interface GrafanaHealthData {
+  connected: boolean
+  database: string
+  version: string
+  commit: string
+  statusJson: string
+}
+
+export interface GrafanaDatasourceItem {
+  id: number
+  uid: string
+  name: string
+  type: string
+  url: string
+  access: string
+  isDefault: boolean
+  basicAuth: boolean
+  withCredentials: boolean
+  database: string
+  user: string
+}
+
+export interface GrafanaDashboardSummaryItem {
+  id: number
+  uid: string
+  title: string
+  url: string
+  type: string
+  tags: string[]
+  isStarred: boolean
+  folderUid: string
+  folderTitle: string
+}
+
+export interface GrafanaDashboardData {
+  connected: boolean
+  uid: string
+  title: string
+  url: string
+  panelCount: number
+  dashboardJson: string
+  metaJson: string
+}
+
+export interface GrafanaFolderItem {
+  id: number
+  uid: string
+  title: string
+  url: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -207,7 +264,7 @@ export class MonitoringError extends Error {
   }
 }
 
-type Component = 'prometheus' | 'alertmanager' | 'loki'
+type Component = 'prometheus' | 'alertmanager' | 'loki' | 'grafana'
 type HttpMethod = 'GET' | 'POST' | 'DELETE'
 
 interface ComponentOptions {
@@ -254,6 +311,10 @@ function asNumericValue(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0
   }
   return 0
+}
+
+function asBoolean(record: Record<string, unknown>, key: string): boolean {
+  return record[key] === true
 }
 
 function toJson(value: unknown): string {
@@ -340,6 +401,55 @@ function mapLokiPatterns(data: unknown): LokiPatternItem[] {
   })
 }
 
+function mapGrafanaDatasource(data: unknown): GrafanaDatasourceItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    uid: asString(record, 'uid'),
+    name: asString(record, 'name'),
+    type: asString(record, 'type'),
+    url: asString(record, 'url'),
+    access: asString(record, 'access'),
+    isDefault: asBoolean(record, 'isDefault'),
+    basicAuth: asBoolean(record, 'basicAuth'),
+    withCredentials: asBoolean(record, 'withCredentials'),
+    database: asString(record, 'database'),
+    user: asString(record, 'user'),
+  }
+}
+
+function mapGrafanaDashboardSummary(data: unknown): GrafanaDashboardSummaryItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    uid: asString(record, 'uid'),
+    title: asString(record, 'title'),
+    url: asString(record, 'url'),
+    type: asString(record, 'type'),
+    tags: asArray(record.tags).map(tag => typeof tag === 'string' ? tag : String(tag ?? '')),
+    isStarred: asBoolean(record, 'isStarred'),
+    folderUid: asString(record, 'folderUid'),
+    folderTitle: asString(record, 'folderTitle'),
+  }
+}
+
+function mapGrafanaFolder(data: unknown): GrafanaFolderItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    uid: asString(record, 'uid'),
+    title: asString(record, 'title'),
+    url: asString(record, 'url'),
+  }
+}
+
+function countPanels(panels: unknown): number {
+  return asArray(panels).reduce((sum: number, rawPanel) => {
+    const panel = asRecord(rawPanel)
+    return sum + 1 + countPanels(panel.panels)
+  }, 0)
+}
+
 function mapTarget(data: unknown): PrometheusTargetItem {
   const record = asRecord(data)
   return {
@@ -354,6 +464,7 @@ export class MonitoringClient {
   private readonly prometheus: ComponentOptions
   private readonly alertmanager: ComponentOptions
   private readonly loki: ComponentOptions
+  private readonly grafana: ComponentOptions
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
   private readonly allowWrite: boolean
@@ -378,6 +489,12 @@ export class MonitoringClient {
       password: options.lokiPassword,
       tenantId: options.lokiTenantId,
     }
+    this.grafana = {
+      baseUrl: (options.grafanaBaseUrl ?? 'http://localhost:3000').replace(/\/+$/, ''),
+      token: options.grafanaToken,
+      username: options.grafanaUsername,
+      password: options.grafanaPassword,
+    }
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch
     this.timeoutMs = options.timeoutMs ?? 15_000
     this.allowWrite = options.allowWrite ?? false
@@ -395,6 +512,10 @@ export class MonitoringClient {
     return this.loki.baseUrl.length > 0
   }
 
+  hasGrafana(): boolean {
+    return this.grafana.baseUrl.length > 0
+  }
+
   private combinedSignal(signal?: AbortSignal): AbortSignal | undefined {
     if (this.timeoutMs <= 0) return signal
     const timeout = AbortSignal.timeout(this.timeoutMs)
@@ -404,7 +525,8 @@ export class MonitoringClient {
   private headers(component: Component): Record<string, string> {
     const options = component === 'prometheus'
       ? this.prometheus
-      : component === 'loki' ? this.loki : this.alertmanager
+      : component === 'loki' ? this.loki
+        : component === 'grafana' ? this.grafana : this.alertmanager
     const headers: Record<string, string> = {
       accept: 'application/json',
       'user-agent': 'dsh-tool-monitoring',
@@ -429,7 +551,8 @@ export class MonitoringClient {
   ): Promise<unknown> {
     const options = component === 'prometheus'
       ? this.prometheus
-      : component === 'loki' ? this.loki : this.alertmanager
+      : component === 'loki' ? this.loki
+        : component === 'grafana' ? this.grafana : this.alertmanager
     const response = await this.fetchImpl(`${options.baseUrl}${path}`, {
       method,
       headers: this.headers(component),
@@ -476,6 +599,14 @@ export class MonitoringClient {
     signal?: AbortSignal,
   ): Promise<unknown> {
     return this.request('alertmanager', method, path, body, signal)
+  }
+
+  private async grafanaRequest(
+    method: HttpMethod,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    return this.request('grafana', method, path, undefined, signal)
   }
 
   private async lokiRequest(
@@ -955,6 +1086,101 @@ export class MonitoringClient {
       options.signal,
     )
     return { connected: true, items: mapLokiPatterns(data) }
+  }
+
+  async grafanaGetHealth(options: { signal?: AbortSignal } = {}): Promise<GrafanaHealthData> {
+    const data = asRecord(await this.grafanaRequest('GET', '/api/health', options.signal))
+    return {
+      connected: true,
+      database: asString(data, 'database'),
+      version: asString(data, 'version'),
+      commit: asString(data, 'commit'),
+      statusJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async grafanaListDatasources(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaDatasourceItem[]
+  }> {
+    const data = await this.grafanaRequest('GET', '/api/datasources', options.signal)
+    const items = asArray(data).map(mapGrafanaDatasource)
+    return { connected: true, items }
+  }
+
+  async grafanaGetDatasource(
+    uid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    item: GrafanaDatasourceItem
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/datasources/uid/${encodeURIComponent(uid)}`,
+      options.signal,
+    )
+    return { connected: true, item: mapGrafanaDatasource(data) }
+  }
+
+  async grafanaSearchDashboards(
+    options: {
+      query?: string
+      tag?: string
+      starred?: boolean
+      limit?: number
+      page?: number
+      signal?: AbortSignal
+    } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaDashboardSummaryItem[]
+  }> {
+    const params = ['type=dash-db']
+    if (options.query) params.push(`query=${encodeURIComponent(options.query)}`)
+    if (options.tag) params.push(`tag=${encodeURIComponent(options.tag)}`)
+    if (options.starred !== undefined) params.push(`starred=${options.starred ? 'true' : 'false'}`)
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    if (options.page && options.page > 0) params.push(`page=${Math.floor(options.page)}`)
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/search?${params.join('&')}`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaDashboardSummary)
+    return { connected: true, items }
+  }
+
+  async grafanaGetDashboard(
+    uid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<GrafanaDashboardData> {
+    const data = asRecord(await this.grafanaRequest(
+      'GET',
+      `/api/dashboards/uid/${encodeURIComponent(uid)}`,
+      options.signal,
+    ))
+    const dashboard = asRecord(data.dashboard)
+    const meta = asRecord(data.meta)
+    const panels = asArray(dashboard.panels)
+    return {
+      connected: true,
+      uid: asString(dashboard, 'uid'),
+      title: asString(dashboard, 'title'),
+      url: asString(dashboard, 'url') || asString(meta, 'url') || `/d/${encodeURIComponent(uid)}`,
+      panelCount: countPanels(panels),
+      dashboardJson: JSON.stringify(data.dashboard ?? {}),
+      metaJson: JSON.stringify(data.meta ?? {}),
+    }
+  }
+
+  async grafanaListFolders(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaFolderItem[]
+  }> {
+    const data = await this.grafanaRequest('GET', '/api/folders', options.signal)
+    const items = asArray(data).map(mapGrafanaFolder)
+    return { connected: true, items }
   }
 
   async deleteSeries(

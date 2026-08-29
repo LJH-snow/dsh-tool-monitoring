@@ -334,6 +334,116 @@ describe('MonitoringClient', () => {
     )
   })
 
+  it('maps Grafana health, datasources, dashboards, and folders', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am({ database: 'ok', version: '11.4.0', commit: 'abc123' }))
+      .mockResolvedValueOnce(am([{
+        id: 1,
+        uid: 'ds-1',
+        name: 'Prometheus',
+        type: 'prometheus',
+        url: 'http://prom:9090',
+        access: 'proxy',
+        isDefault: true,
+        basicAuth: false,
+        withCredentials: false,
+        database: '',
+        user: '',
+      }]))
+      .mockResolvedValueOnce(am({
+        id: 1,
+        uid: 'ds-1',
+        name: 'Prometheus',
+        type: 'prometheus',
+        url: 'http://prom:9090',
+        access: 'proxy',
+        isDefault: true,
+        basicAuth: false,
+        withCredentials: false,
+        database: '',
+        user: '',
+      }))
+      .mockResolvedValueOnce(am([{
+        id: 10,
+        uid: 'dash-1',
+        title: 'Production Overview',
+        url: '/d/dash-1/production-overview',
+        type: 'dash-db',
+        tags: ['prod'],
+        isStarred: true,
+        folderUid: 'folder-1',
+        folderTitle: 'Ops',
+      }]))
+      .mockResolvedValueOnce(am({
+        dashboard: {
+          uid: 'dash-1',
+          title: 'Production Overview',
+          url: '/d/dash-1/production-overview',
+          panels: [{ id: 1 }, { id: 2, panels: [{ id: 3 }] }],
+        },
+        meta: { url: '/d/dash-1/production-overview' },
+      }))
+      .mockResolvedValueOnce(am([{
+        id: 1,
+        uid: 'folder-1',
+        title: 'Ops',
+        url: '/dashboards/f/folder-1/ops',
+      }]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaGetHealth()).toMatchObject({
+      connected: true,
+      database: 'ok',
+      version: '11.4.0',
+      commit: 'abc123',
+    })
+    expect((await client.grafanaListDatasources()).items[0]).toMatchObject({
+      uid: 'ds-1',
+      name: 'Prometheus',
+      isDefault: true,
+    })
+    expect((await client.grafanaGetDatasource('ds-1')).item).toMatchObject({
+      uid: 'ds-1',
+      type: 'prometheus',
+    })
+    expect((await client.grafanaSearchDashboards({
+      query: 'prod',
+      tag: 'prod',
+      starred: true,
+      limit: 20,
+      page: 1,
+    })).items[0]).toMatchObject({
+      uid: 'dash-1',
+      title: 'Production Overview',
+      folderUid: 'folder-1',
+      folderTitle: 'Ops',
+    })
+    expect(await client.grafanaGetDashboard('dash-1')).toMatchObject({
+      connected: true,
+      uid: 'dash-1',
+      title: 'Production Overview',
+      panelCount: 3,
+    })
+    expect((await client.grafanaListFolders()).items[0]).toMatchObject({
+      uid: 'folder-1',
+      title: 'Ops',
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://grafana:3000/api/health')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/datasources')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/datasources/uid/ds-1')
+    expect(fetchImpl.mock.calls[3][0]).toBe(
+      'http://grafana:3000/api/search?type=dash-db&query=prod&tag=prod&starred=true&limit=20&page=1',
+    )
+    expect(fetchImpl.mock.calls[4][0]).toBe('http://grafana:3000/api/dashboards/uid/dash-1')
+    expect(fetchImpl.mock.calls[5][0]).toBe('http://grafana:3000/api/folders')
+  })
+
   it('maps Alertmanager status, alerts, groups, silences, and receivers', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(am({ versionInfo: { version: '0.27.0' }, uptime: '2026-08-28T00:00:00Z' }))

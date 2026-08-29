@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume and detected patterns, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume and detected patterns, inspect Grafana health, datasources, dashboards and folders, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -36,13 +36,15 @@ Load the plugin in a dsh composition config (`cordis.yml`):
     lokiBaseUrl: 'http://loki:3100'                   # optional, default http://localhost:3100
     lokiToken: 'plain_token_or_Bearer_token'          # optional
     lokiTenantId: 'tenant-a'                          # optional, multi-tenant Loki only
+    grafanaBaseUrl: 'http://grafana:3000'             # optional, default http://localhost:3000
+    grafanaToken: 'plain_token_or_Bearer_token'       # optional
     timeoutMs: 15000                                  # optional, default 15000
     allowWrite: false                                 # optional, write tools are disabled by default
 ```
 
 Full example: [examples/cordis.yml](examples/cordis.yml).
 
-Each component can also use HTTP Basic Auth with `prometheusUsername`/`prometheusPassword`, `alertmanagerUsername`/`alertmanagerPassword`, or `lokiUsername`/`lokiPassword`. Set a base URL to an empty string to disable that component and return an explicit `connected: false` business value.
+Each component can also use HTTP Basic Auth with `prometheusUsername`/`prometheusPassword`, `alertmanagerUsername`/`alertmanagerPassword`, `lokiUsername`/`lokiPassword`, or `grafanaUsername`/`grafanaPassword`. Set a base URL to an empty string to disable that component and return an explicit `connected: false` business value.
 
 > Security: write tools are gated by `allowWrite`. Keep it `false` unless the dsh runtime is explicitly allowed to delete Prometheus series, create or delete Alertmanager silences, or send alerts.
 
@@ -80,6 +82,17 @@ Loki tools:
 | `loki_get_index_volume` | Get index volume for labels or series | no |
 | `loki_get_index_volume_range` | Get index volume as a matrix over a range | no |
 | `loki_get_patterns` | Get patterns detected in Loki logs | no |
+
+Grafana tools:
+
+| Tool | Description | Write |
+|---|---|---|
+| `grafana_get_health` | Get health, database status, version and commit | no |
+| `grafana_list_datasources` | List datasources with safe connection metadata | no |
+| `grafana_get_datasource` | Get one datasource by UID | no |
+| `grafana_search_dashboards` | Search dashboards by query, tag, starred status, limit and page | no |
+| `grafana_get_dashboard` | Get dashboard JSON, metadata and panel count by UID | no |
+| `grafana_list_folders` | List folders with UID, title and URL | no |
 
 Alertmanager tools:
 
