@@ -2390,15 +2390,16 @@ export class MonitoringClient {
 
   async grafanaListUserRoles(
     userId: string | number,
-    options: { signal?: AbortSignal } = {},
+    options: { includeHidden?: boolean; signal?: AbortSignal } = {},
   ): Promise<{
     connected: boolean
     userId: number
     items: GrafanaAccessControlRoleItem[]
   }> {
+    const suffix = options.includeHidden ? '?includeHidden=true' : ''
     const data = await this.grafanaRequest(
       'GET',
-      `/api/access-control/users/${encodeURIComponent(String(userId))}/roles`,
+      `/api/access-control/users/${encodeURIComponent(String(userId))}/roles${suffix}`,
       options.signal,
     )
     const root = asRecord(data)
@@ -2406,6 +2407,29 @@ export class MonitoringClient {
     return {
       connected: true,
       userId: asNumber(root, 'userId') || Number(userId) || 0,
+      items: roles.map(mapGrafanaAccessControlRole),
+    }
+  }
+
+  async grafanaListTeamRoles(
+    teamId: string | number,
+    options: { includeHidden?: boolean; signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    teamId: number
+    items: GrafanaAccessControlRoleItem[]
+  }> {
+    const suffix = options.includeHidden ? '?includeHidden=true' : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/access-control/teams/${encodeURIComponent(String(teamId))}/roles${suffix}`,
+      options.signal,
+    )
+    const root = asRecord(data)
+    const roles = asArray(root.roles).length > 0 ? asArray(root.roles) : asArray(data)
+    return {
+      connected: true,
+      teamId: asNumber(root, 'teamId') || Number(teamId) || 0,
       items: roles.map(mapGrafanaAccessControlRole),
     }
   }

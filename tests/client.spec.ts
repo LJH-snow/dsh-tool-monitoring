@@ -964,6 +964,55 @@ describe('MonitoringClient', () => {
     )
   })
 
+  it('maps hidden role filters and team role assignments', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am([{
+        version: 1,
+        uid: 'role-1',
+        name: 'fixed:reports:reader',
+        displayName: 'Report reader',
+        description: '',
+        group: '',
+        hidden: true,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+      }]))
+      .mockResolvedValueOnce(am([{
+        version: 2,
+        uid: 'role-2',
+        name: 'fixed:alerts:writer',
+        displayName: 'Alert writer',
+        description: '',
+        group: '',
+        hidden: false,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+      }]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListUserRoles(10, { includeHidden: true })).toMatchObject({
+      connected: true,
+      userId: 10,
+      items: [{ uid: 'role-1', hidden: true }],
+    })
+    expect(await client.grafanaListTeamRoles(5, { includeHidden: true })).toMatchObject({
+      connected: true,
+      teamId: 5,
+      items: [{ uid: 'role-2', hidden: false }],
+    })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/access-control/users/10/roles?includeHidden=true',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/teams/5/roles?includeHidden=true',
+    )
+  })
+
   it('maps Grafana admin stats, plugins, dashboard versions, and snapshots', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(am({

@@ -65,6 +65,7 @@ describe('tool definitions', () => {
       'grafana_list_service_account_tokens',
       'grafana_list_service_accounts',
       'grafana_list_team_members',
+      'grafana_list_team_roles',
       'grafana_list_teams',
       'grafana_list_user_roles',
       'grafana_search_dashboards',
@@ -737,6 +738,52 @@ describe('tool definitions', () => {
     )
     expect(fetchImpl.mock.calls[2][0]).toBe(
       'http://grafana:3000/api/access-control/users/10/roles',
+    )
+  })
+
+  it('executes Grafana user and team role read tools with hidden filters', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json([{
+        version: 1,
+        uid: 'role-1',
+        name: 'fixed:reports:reader',
+        displayName: 'Report reader',
+        description: '',
+        group: '',
+        hidden: true,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+      }]))
+      .mockResolvedValueOnce(json([{
+        version: 2,
+        uid: 'role-2',
+        name: 'fixed:alerts:writer',
+        displayName: 'Alert writer',
+        description: '',
+        group: '',
+        hidden: false,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+      }]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect((await map.grafana_list_user_roles.execute({
+      userId: 10,
+      includeHidden: true,
+    }, exec())).items[0]).toMatchObject({ uid: 'role-1', hidden: true })
+    expect((await map.grafana_list_team_roles.execute({
+      teamId: 5,
+      includeHidden: true,
+    }, exec())).items[0]).toMatchObject({ uid: 'role-2', hidden: false })
+
+    expect(fetchImpl.mock.calls.length).toBe(2)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/access-control/users/10/roles?includeHidden=true',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/teams/5/roles?includeHidden=true',
     )
   })
 

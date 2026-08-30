@@ -2386,6 +2386,7 @@ export function createTools(client: MonitoringClient) {
       description: 'List Grafana access control roles directly assigned to one user.',
       parameters: {
         userId: { type: 'integer', required: true, description: 'Grafana user ID' },
+        includeHidden: { type: 'boolean', description: 'Include hidden roles when true' },
       },
       output: {
         schema: {
@@ -2413,7 +2414,50 @@ export function createTools(client: MonitoringClient) {
       },
       async execute(args, exec) {
         if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
-        return client.grafanaListUserRoles(args.userId as number, { signal: exec.signal })
+        return client.grafanaListUserRoles(args.userId as number, {
+          includeHidden: args.includeHidden,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_team_roles',
+      description: 'List Grafana access control roles directly assigned to one team.',
+      parameters: {
+        teamId: { type: 'integer', required: true, description: 'Grafana team ID' },
+        includeHidden: { type: 'boolean', description: 'Include hidden roles when true' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            teamId: { type: 'number' },
+            items: { type: 'array', items: grafanaAccessControlRoleItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAccessControlRoles(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana team roles ${args.teamId ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} role(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListTeamRoles(args.teamId as number, {
+          includeHidden: args.includeHidden,
+          signal: exec.signal,
+        })
       },
     }),
 
