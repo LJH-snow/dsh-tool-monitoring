@@ -433,6 +433,11 @@ export interface GrafanaAccessControlRoleItem {
   permissionsJson: string
 }
 
+export interface GrafanaBuiltinRoleItem {
+  role: string
+  permissionsJson: string
+}
+
 export interface GrafanaAdminStatsData {
   connected: boolean
   users: number
@@ -1050,6 +1055,28 @@ function mapGrafanaAccessControlRole(data: unknown): GrafanaAccessControlRoleIte
     global: asBoolean(record, 'global'),
     permissionsJson: toJson(record.permissions),
   }
+}
+
+function mapGrafanaBuiltinRoles(data: unknown): GrafanaBuiltinRoleItem[] {
+  const array = asArray(data)
+  if (array.length > 0) {
+    return array.map(item => {
+      const record = asRecord(item)
+      return {
+        role: asString(record, 'role')
+          || asString(record, 'name')
+          || asString(record, 'builtInRole')
+          || asString(record, 'builtinRole'),
+        permissionsJson: toJson(record.permissions ?? []),
+      }
+    })
+  }
+  return Object.entries(asRecord(data)).map(([role, value]) => {
+    const permissions = value && typeof value === 'object' && !Array.isArray(value)
+      ? asRecord(value).permissions ?? value
+      : value
+    return { role, permissionsJson: toJson(permissions ?? []) }
+  })
 }
 
 function mapGrafanaPlugin(data: unknown): GrafanaPluginItem {
@@ -2334,6 +2361,53 @@ export class MonitoringClient {
       options.signal,
     )
     return { connected: true, item: mapGrafanaAccessControlRole(data) }
+  }
+
+  async grafanaListBuiltinRoles(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaBuiltinRoleItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/access-control/builtin-roles',
+      options.signal,
+    )
+    return { connected: true, items: mapGrafanaBuiltinRoles(data) }
+  }
+
+  async grafanaGetBuiltinRole(
+    builtInRole: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    item: GrafanaBuiltinRoleItem
+  }> {
+    const list = await this.grafanaListBuiltinRoles(options)
+    const normalized = builtInRole.trim().toLowerCase()
+    const item = list.items.find(role => role.role.toLowerCase() === normalized)
+    return { connected: true, item: item ?? { role: builtInRole, permissionsJson: '{}' } }
+  }
+
+  async grafanaListUserRoles(
+    userId: string | number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    userId: number
+    items: GrafanaAccessControlRoleItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/access-control/users/${encodeURIComponent(String(userId))}/roles`,
+      options.signal,
+    )
+    const root = asRecord(data)
+    const roles = asArray(root.roles).length > 0 ? asArray(root.roles) : asArray(data)
+    return {
+      connected: true,
+      userId: asNumber(root, 'userId') || Number(userId) || 0,
+      items: roles.map(mapGrafanaAccessControlRole),
+    }
   }
 
   async grafanaGetAdminStats(options: { signal?: AbortSignal } = {}): Promise<GrafanaAdminStatsData> {

@@ -13,6 +13,7 @@ import {
   type GrafanaAlertInstanceItem,
   type GrafanaAdminStatsData,
   type GrafanaAnnotationItem,
+  type GrafanaBuiltinRoleItem,
   type GrafanaContactPointItem,
   type GrafanaCurrentOrgData,
   type GrafanaCurrentUserData,
@@ -2312,6 +2313,111 @@ export function createTools(client: MonitoringClient) {
     }),
 
     defineTool({
+      name: 'grafana_list_builtin_roles',
+      description: 'List Grafana built-in roles with their assigned permissions.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaBuiltinRoleItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaBuiltinRoles(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana built-in roles', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} built-in role(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListBuiltinRoles({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_builtin_role',
+      description: 'Get one Grafana built-in role with its assigned permissions.',
+      parameters: {
+        builtInRole: {
+          type: 'string',
+          required: true,
+          description: 'Grafana built-in role name, for example Viewer, Editor, Admin, or Grafana Admin',
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaBuiltinRoleItemSchema,
+          },
+        },
+        render: (_args, value) => renderGrafanaBuiltinRole(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana built-in role ${args.builtInRole ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { role?: string } }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `Built-in role ${v.item?.role ?? ''}` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetBuiltinRole(args.builtInRole as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_user_roles',
+      description: 'List Grafana access control roles directly assigned to one user.',
+      parameters: {
+        userId: { type: 'integer', required: true, description: 'Grafana user ID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            userId: { type: 'number' },
+            items: { type: 'array', items: grafanaAccessControlRoleItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAccessControlRoles(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana user roles ${args.userId ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} role(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListUserRoles(args.userId as number, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
       name: 'grafana_get_admin_stats',
       description: 'Get Grafana admin stats covering users, orgs, dashboards, snapshots, datasources, playlists, stars, alerts, and active session counts.',
       parameters: {},
@@ -3159,6 +3265,15 @@ const grafanaAccessControlRoleItemSchema = {
   },
 } as const
 
+const grafanaBuiltinRoleItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    role: { type: 'string' },
+    permissionsJson: { type: 'string' },
+  },
+} as const
+
 const grafanaPluginItemSchema = {
   type: 'object',
   additionalProperties: false,
@@ -3682,6 +3797,18 @@ function renderGrafanaAccessControlRole(value: { connected?: boolean; reason?: s
   const item = value.item
   if (!item?.uid && !item?.name) return text('No Grafana access control role found.')
   return text(`${item.name ?? ''} (${item.uid ?? ''})\ndisplayName: ${item.displayName ?? ''}\ngroup: ${item.group ?? ''}\nglobal: ${item.global ? 'yes' : 'no'}\nversion: ${item.version ?? 0}\n${item.permissionsJson ?? '{}'}`)
+}
+
+function renderGrafanaBuiltinRoles(items: Array<Partial<GrafanaBuiltinRoleItem>>) {
+  if (!items.length) return text('No Grafana built-in roles found.')
+  return text(items.map(role => `${role.role ?? ''}\n${role.permissionsJson ?? '{}'}`).join('\n\n'))
+}
+
+function renderGrafanaBuiltinRole(value: { connected?: boolean; reason?: string; item?: Partial<GrafanaBuiltinRoleItem> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  const item = value.item
+  if (!item?.role) return text('No Grafana built-in role found.')
+  return text(`${item.role}\n${item.permissionsJson ?? '{}'}`)
 }
 
 function renderGrafanaAdminStats(value: Partial<GrafanaAdminStatsData> & { reason?: string }) {

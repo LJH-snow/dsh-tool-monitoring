@@ -904,6 +904,66 @@ describe('MonitoringClient', () => {
     )
   })
 
+  it('maps Grafana built-in roles and direct user role assignments', async () => {
+    const builtinBody = {
+      Viewer: [{ action: 'dashboards:read', scope: 'dashboards:*' }],
+      Editor: [{ action: 'dashboards:write', scope: 'dashboards:*' }],
+      Admin: [{ action: 'org.users:read', scope: 'users:*' }],
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am(builtinBody))
+      .mockResolvedValueOnce(am(builtinBody))
+      .mockResolvedValueOnce(am([{
+        version: 1,
+        uid: 'role-1',
+        name: 'fixed:reports:reader',
+        displayName: 'Report reader',
+        description: '',
+        group: '',
+        hidden: false,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+      }]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListBuiltinRoles()).toMatchObject({
+      connected: true,
+      items: [
+        { role: 'Viewer', permissionsJson: expect.stringContaining('dashboards:read') },
+        { role: 'Editor', permissionsJson: expect.stringContaining('dashboards:write') },
+        { role: 'Admin' },
+      ],
+    })
+    expect(await client.grafanaGetBuiltinRole('editor')).toMatchObject({
+      connected: true,
+      item: {
+        role: 'Editor',
+        permissionsJson: expect.stringContaining('dashboards:write'),
+      },
+    })
+    expect(await client.grafanaListUserRoles(10)).toMatchObject({
+      connected: true,
+      userId: 10,
+      items: [{ uid: 'role-1', name: 'fixed:reports:reader' }],
+    })
+
+    expect(fetchImpl.mock.calls.length).toBe(3)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/access-control/builtin-roles',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/builtin-roles',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://grafana:3000/api/access-control/users/10/roles',
+    )
+  })
+
   it('maps Grafana admin stats, plugins, dashboard versions, and snapshots', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(am({

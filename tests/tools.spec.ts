@@ -29,6 +29,7 @@ describe('tool definitions', () => {
       'grafana_get_access_control_role',
       'grafana_get_admin_stats',
       'grafana_get_alert_rule',
+      'grafana_get_builtin_role',
       'grafana_get_current_org',
       'grafana_get_current_user',
       'grafana_get_dashboard',
@@ -46,6 +47,7 @@ describe('tool definitions', () => {
       'grafana_list_alert_instances',
       'grafana_list_alert_rules',
       'grafana_list_annotations',
+      'grafana_list_builtin_roles',
       'grafana_list_contact_points',
       'grafana_list_current_user_orgs',
       'grafana_list_dashboard_permissions',
@@ -64,6 +66,7 @@ describe('tool definitions', () => {
       'grafana_list_service_accounts',
       'grafana_list_team_members',
       'grafana_list_teams',
+      'grafana_list_user_roles',
       'grafana_search_dashboards',
       'loki_get_detected_field_values',
       'loki_get_detected_fields',
@@ -681,6 +684,59 @@ describe('tool definitions', () => {
     )
     expect(fetchImpl.mock.calls[2][0]).toBe(
       'http://grafana:3000/api/access-control/roles/role-1',
+    )
+  })
+
+  it('executes Grafana built-in role and user role read tools', async () => {
+    const builtinBody = {
+      Viewer: [{ action: 'dashboards:read', scope: 'dashboards:*' }],
+      Editor: [{ action: 'dashboards:write', scope: 'dashboards:*' }],
+      Admin: [{ action: 'org.users:read', scope: 'users:*' }],
+    }
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json(builtinBody))
+      .mockResolvedValueOnce(json(builtinBody))
+      .mockResolvedValueOnce(json([{
+        version: 1,
+        uid: 'role-1',
+        name: 'fixed:reports:reader',
+        displayName: 'Report reader',
+        description: '',
+        group: '',
+        hidden: false,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+      }]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect((await map.grafana_list_builtin_roles.execute({}, exec())).items).toMatchObject([
+      { role: 'Viewer' },
+      { role: 'Editor' },
+      { role: 'Admin' },
+    ])
+    expect((await map.grafana_get_builtin_role.execute({
+      builtInRole: 'Editor',
+    }, exec())).item).toMatchObject({
+      role: 'Editor',
+      permissionsJson: expect.stringContaining('dashboards:write'),
+    })
+    expect((await map.grafana_list_user_roles.execute({
+      userId: 10,
+    }, exec())).items[0]).toMatchObject({
+      uid: 'role-1',
+      name: 'fixed:reports:reader',
+    })
+
+    expect(fetchImpl.mock.calls.length).toBe(3)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/access-control/builtin-roles',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/builtin-roles',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://grafana:3000/api/access-control/users/10/roles',
     )
   })
 
