@@ -394,6 +394,29 @@ export interface GrafanaOrgUserItem {
   lastSeenAtAge: string
 }
 
+export interface GrafanaOrgItem {
+  id: number
+  name: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GrafanaOrgListData {
+  connected: boolean
+  totalCount: number
+  items: GrafanaOrgItem[]
+}
+
+export interface GrafanaOrgDetailData {
+  connected: boolean
+  id: number
+  name: string
+  addressJson: string
+  createdAt: string
+  updatedAt: string
+  orgJson: string
+}
+
 export interface GrafanaServiceAccountItem {
   id: number
   name: string
@@ -1002,6 +1025,16 @@ function mapGrafanaOrgUser(data: unknown): GrafanaOrgUserItem {
     isExternal: asBoolean(record, 'isExternal') || asBoolean(record, 'is_external'),
     lastSeenAt: asString(record, 'lastSeenAt'),
     lastSeenAtAge: asString(record, 'lastSeenAtAge'),
+  }
+}
+
+function mapGrafanaOrg(data: unknown): GrafanaOrgItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    name: asString(record, 'name'),
+    createdAt: asString(record, 'createdAt') || asString(record, 'created'),
+    updatedAt: asString(record, 'updatedAt') || asString(record, 'updated'),
   }
 }
 
@@ -2395,6 +2428,48 @@ export class MonitoringClient {
     const data = await this.grafanaRequest(
       'GET',
       '/api/org/users',
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaOrgUser)
+    return { connected: true, items }
+  }
+
+  async grafanaListOrgs(options: { signal?: AbortSignal } = {}): Promise<GrafanaOrgListData> {
+    const data = await this.grafanaRequest('GET', '/api/orgs', options.signal)
+    const items = asArray(data).map(mapGrafanaOrg)
+    return { connected: true, totalCount: items.length, items }
+  }
+
+  async grafanaGetOrg(
+    orgId: string | number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<GrafanaOrgDetailData> {
+    const data = asRecord(await this.grafanaRequest(
+      'GET',
+      `/api/orgs/${encodeURIComponent(String(orgId))}`,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      id: asNumber(data, 'id'),
+      name: asString(data, 'name'),
+      addressJson: toJson(data.address),
+      createdAt: asString(data, 'createdAt') || asString(data, 'created'),
+      updatedAt: asString(data, 'updatedAt') || asString(data, 'updated'),
+      orgJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async grafanaListOrgUsersByOrg(
+    orgId: string | number,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaOrgUserItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/orgs/${encodeURIComponent(String(orgId))}/users`,
       options.signal,
     )
     const items = asArray(data).map(mapGrafanaOrgUser)

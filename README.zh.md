@@ -121,6 +121,9 @@ Grafana 工具：
 | `grafana_get_team` | 按 ID 查看单个 Grafana 团队 | 否 |
 | `grafana_list_team_members` | 查看某个 Grafana 团队的成员 | 否 |
 | `grafana_list_org_users` | 查看当前组织用户、角色与最近活跃信息 | 否 |
+| `grafana_list_orgs` | 查看 Grafana 组织列表，含 ID、名称与时间戳 | 否 |
+| `grafana_get_org` | 按 ID 查看单个 Grafana 组织，含地址与时间戳 | 否 |
+| `grafana_list_org_users_by_org` | 按组织 ID 查看某个 Grafana 组织的用户 | 否 |
 | `grafana_get_org_preferences` | 查看当前 Grafana 组织偏好，含主题、首页面板、时区与周起始 | 否 |
 | `grafana_get_current_user` | 查看当前 Grafana 用户资料与管理标志 | 否 |
 | `grafana_list_current_user_orgs` | 查看当前用户可访问的 Grafana 组织 | 否 |

@@ -763,6 +763,76 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/users')
   })
 
+  it('maps Grafana organizations and organization users', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am([
+        {
+          id: 1,
+          name: 'Main Org',
+          createdAt: '2026-08-01T00:00:00Z',
+          updatedAt: '2026-08-02T00:00:00Z',
+        },
+        {
+          id: 2,
+          name: 'Secondary Org',
+          createdAt: '2026-08-03T00:00:00Z',
+          updatedAt: '2026-08-04T00:00:00Z',
+        },
+      ]))
+      .mockResolvedValueOnce(am({
+        id: 2,
+        name: 'Secondary Org',
+        address: { city: 'Beijing' },
+        createdAt: '2026-08-03T00:00:00Z',
+        updatedAt: '2026-08-04T00:00:00Z',
+      }))
+      .mockResolvedValueOnce(am([{
+        orgId: 2,
+        userId: 20,
+        email: 'bob@example.com',
+        login: 'bob',
+        name: 'Bob',
+        role: 'Viewer',
+        isExternal: false,
+        lastSeenAt: '2026-08-30T00:00:00Z',
+        lastSeenAtAge: '5m',
+      }]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListOrgs()).toMatchObject({
+      connected: true,
+      totalCount: 2,
+      items: [
+        { id: 1, name: 'Main Org', createdAt: '2026-08-01T00:00:00Z' },
+        { id: 2, name: 'Secondary Org' },
+      ],
+    })
+    expect(await client.grafanaGetOrg(2)).toMatchObject({
+      connected: true,
+      id: 2,
+      name: 'Secondary Org',
+      addressJson: expect.stringContaining('Beijing'),
+      orgJson: expect.stringContaining('Secondary Org'),
+      updatedAt: '2026-08-04T00:00:00Z',
+    })
+    expect((await client.grafanaListOrgUsersByOrg(2)).items[0]).toMatchObject({
+      orgId: 2,
+      userId: 20,
+      login: 'bob',
+      role: 'Viewer',
+      lastSeenAtAge: '5m',
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://grafana:3000/api/orgs')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/orgs/2')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/orgs/2/users')
+  })
+
   it('maps Grafana service accounts, tokens, and org quotas', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(am({

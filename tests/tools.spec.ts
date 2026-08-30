@@ -41,6 +41,7 @@ describe('tool definitions', () => {
       'grafana_get_health',
       'grafana_get_library_element',
       'grafana_get_notification_policy',
+      'grafana_get_org',
       'grafana_get_org_preferences',
       'grafana_get_playlist',
       'grafana_get_service_account',
@@ -64,6 +65,8 @@ describe('tool definitions', () => {
       'grafana_list_library_elements',
       'grafana_list_org_quotas',
       'grafana_list_org_users',
+      'grafana_list_org_users_by_org',
+      'grafana_list_orgs',
       'grafana_list_playlists',
       'grafana_list_plugins',
       'grafana_list_service_account_tokens',
@@ -580,6 +583,70 @@ describe('tool definitions', () => {
     expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/teams/1')
     expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/teams/1/members')
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/users')
+  })
+
+  it('executes Grafana organization and org user read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json([
+        {
+          id: 1,
+          name: 'Main Org',
+          createdAt: '2026-08-01T00:00:00Z',
+          updatedAt: '2026-08-02T00:00:00Z',
+        },
+        {
+          id: 2,
+          name: 'Secondary Org',
+          createdAt: '2026-08-03T00:00:00Z',
+          updatedAt: '2026-08-04T00:00:00Z',
+        },
+      ]))
+      .mockResolvedValueOnce(json({
+        id: 2,
+        name: 'Secondary Org',
+        address: { city: 'Beijing' },
+        createdAt: '2026-08-03T00:00:00Z',
+        updatedAt: '2026-08-04T00:00:00Z',
+      }))
+      .mockResolvedValueOnce(json([{
+        orgId: 2,
+        userId: 20,
+        email: 'bob@example.com',
+        login: 'bob',
+        name: 'Bob',
+        role: 'Viewer',
+        isExternal: false,
+        lastSeenAt: '2026-08-30T00:00:00Z',
+        lastSeenAtAge: '5m',
+      }]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect(await map.grafana_list_orgs.execute({}, exec())).toMatchObject({
+      connected: true,
+      totalCount: 2,
+      items: [
+        { id: 1, name: 'Main Org' },
+        { id: 2, name: 'Secondary Org' },
+      ],
+    })
+    expect(await map.grafana_get_org.execute({ orgId: 2 }, exec())).toMatchObject({
+      connected: true,
+      id: 2,
+      name: 'Secondary Org',
+      addressJson: expect.stringContaining('Beijing'),
+    })
+    expect((await map.grafana_list_org_users_by_org.execute({ orgId: 2 }, exec())).items[0]).toMatchObject({
+      orgId: 2,
+      userId: 20,
+      login: 'bob',
+      role: 'Viewer',
+      lastSeenAtAge: '5m',
+    })
+
+    expect(fetchImpl.mock.calls.length).toBe(3)
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://grafana:3000/api/orgs')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/orgs/2')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/orgs/2/users')
   })
 
   it('executes Grafana service account and org quota read tools', async () => {

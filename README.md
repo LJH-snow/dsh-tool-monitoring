@@ -121,6 +121,9 @@ Grafana tools:
 | `grafana_get_team` | Get one Grafana team by ID | no |
 | `grafana_list_team_members` | List members for one Grafana team | no |
 | `grafana_list_org_users` | List Grafana org users with roles and last seen info | no |
+| `grafana_list_orgs` | List Grafana organizations with id, name and timestamps | no |
+| `grafana_get_org` | Get one Grafana organization by ID with address and timestamps | no |
+| `grafana_list_org_users_by_org` | List users in one Grafana organization by organization ID | no |
 | `grafana_get_org_preferences` | Get current Grafana organization preferences with theme, home dashboard, timezone, and week start | no |
 | `grafana_get_current_user` | Get the current Grafana user profile and admin flags | no |
 | `grafana_list_current_user_orgs` | List Grafana organizations available to the current user | no |
