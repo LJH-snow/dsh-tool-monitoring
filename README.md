@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, datasources, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder and datasource permissions, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, datasources, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder, dashboard and datasource permissions, access control roles, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -95,12 +95,15 @@ Grafana tools:
 | `grafana_list_datasource_permissions` | List datasource permissions by UID with user, team, built-in role, and actions | no |
 | `grafana_search_dashboards` | Search dashboards by query, tag, starred status, limit and page | no |
 | `grafana_get_dashboard` | Get dashboard JSON, metadata and panel count by UID | no |
+| `grafana_list_dashboard_permissions` | List dashboard permissions by UID with user, team, and built-in role grants | no |
 | `grafana_list_folders` | List folders with UID, title and URL | no |
 | `grafana_list_folder_permissions` | List folder permissions by UID with user, team, and built-in role grants | no |
 | `grafana_list_annotations` | List annotations by time, dashboard, panel, type and tags | no |
 | `grafana_list_alert_instances` | List current Grafana-managed alert instances | no |
 | `grafana_list_alert_rules` | List Grafana alert rules with folder, group, condition and state settings | no |
 | `grafana_get_alert_rule` | Get one Grafana alert rule by UID with query data JSON | no |
+| `grafana_get_access_control_role` | Get one Grafana access control role by UID with permissions and scopes | no |
+| `grafana_list_access_control_roles` | List Grafana access control roles, optionally including hidden roles | no |
 | `grafana_list_contact_points` | List Grafana contact points with safe settings metadata | no |
 | `grafana_get_notification_policy` | Get the current Grafana notification policy tree | no |
 | `grafana_list_teams` | Search Grafana teams by query, exact name, sort and pagination | no |

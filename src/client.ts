@@ -399,6 +399,40 @@ export interface GrafanaDatasourcePermissionItem {
   permission: string
 }
 
+export interface GrafanaDashboardPermissionItem {
+  id: number
+  dashboardId: number
+  created: string
+  updated: string
+  userId: number
+  userLogin: string
+  userEmail: string
+  teamId: number
+  team: string
+  role: string
+  permission: number
+  permissionName: string
+  uid: string
+  title: string
+  slug: string
+  isFolder: boolean
+  url: string
+}
+
+export interface GrafanaAccessControlRoleItem {
+  version: number
+  uid: string
+  name: string
+  displayName: string
+  description: string
+  group: string
+  hidden: boolean
+  updated: string
+  created: string
+  global: boolean
+  permissionsJson: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -830,6 +864,46 @@ function mapGrafanaDatasourcePermission(data: unknown): GrafanaDatasourcePermiss
     builtInRole: asString(record, 'builtInRole'),
     actionsJson: toJson(record.actions),
     permission: asString(record, 'permission'),
+  }
+}
+
+function mapGrafanaDashboardPermission(data: unknown): GrafanaDashboardPermissionItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    dashboardId: asNumber(record, 'dashboardId') || asNumber(record, 'dashboardID'),
+    created: asString(record, 'created'),
+    updated: asString(record, 'updated'),
+    userId: asNumber(record, 'userId') || asNumber(record, 'userID'),
+    userLogin: asString(record, 'userLogin'),
+    userEmail: asString(record, 'userEmail'),
+    teamId: asNumber(record, 'teamId') || asNumber(record, 'teamID'),
+    team: asString(record, 'team'),
+    role: asString(record, 'role'),
+    permission: asNumber(record, 'permission'),
+    permissionName: asString(record, 'permissionName'),
+    uid: asString(record, 'uid'),
+    title: asString(record, 'title'),
+    slug: asString(record, 'slug'),
+    isFolder: asBoolean(record, 'isFolder'),
+    url: asString(record, 'url'),
+  }
+}
+
+function mapGrafanaAccessControlRole(data: unknown): GrafanaAccessControlRoleItem {
+  const record = asRecord(data)
+  return {
+    version: asNumber(record, 'version'),
+    uid: asString(record, 'uid'),
+    name: asString(record, 'name'),
+    displayName: asString(record, 'displayName'),
+    description: asString(record, 'description'),
+    group: asString(record, 'group'),
+    hidden: asBoolean(record, 'hidden'),
+    updated: asString(record, 'updated'),
+    created: asString(record, 'created'),
+    global: asBoolean(record, 'global'),
+    permissionsJson: toJson(record.permissions),
   }
 }
 
@@ -1932,6 +2006,53 @@ export class MonitoringClient {
     )
     const items = asArray(data).map(mapGrafanaDatasourcePermission)
     return { connected: true, items }
+  }
+
+  async grafanaListDashboardPermissions(
+    dashboardUid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaDashboardPermissionItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/dashboards/uid/${encodeURIComponent(dashboardUid)}/permissions`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaDashboardPermission)
+    return { connected: true, items }
+  }
+
+  async grafanaListAccessControlRoles(
+    options: { includeHidden?: boolean; signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaAccessControlRoleItem[]
+  }> {
+    const suffix = options.includeHidden ? '?includeHidden=true' : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/access-control/roles${suffix}`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaAccessControlRole)
+    return { connected: true, items }
+  }
+
+  async grafanaGetAccessControlRole(
+    roleUid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    item: GrafanaAccessControlRoleItem
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/access-control/roles/${encodeURIComponent(roleUid)}`,
+      options.signal,
+    )
+    return { connected: true, item: mapGrafanaAccessControlRole(data) }
   }
 
   async deleteSeries(

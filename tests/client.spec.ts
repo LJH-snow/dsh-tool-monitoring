@@ -806,6 +806,104 @@ describe('MonitoringClient', () => {
     )
   })
 
+  it('maps Grafana dashboard permissions and access control roles', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am([
+        {
+          id: 1,
+          dashboardId: -1,
+          created: '2026-08-30T00:00:00Z',
+          updated: '2026-08-30T01:00:00Z',
+          userId: 0,
+          userLogin: '',
+          userEmail: '',
+          teamId: 0,
+          team: '',
+          role: 'Viewer',
+          permission: 1,
+          permissionName: 'View',
+          uid: 'dash-1',
+          title: '',
+          slug: '',
+          isFolder: false,
+          url: '',
+        },
+        {
+          id: 2,
+          dashboardId: -1,
+          userId: 10,
+          userLogin: 'alice',
+          userEmail: 'alice@example.com',
+          permission: 4,
+          permissionName: 'Admin',
+          uid: 'dash-1',
+        },
+      ]))
+      .mockResolvedValueOnce(am([
+        {
+          version: 3,
+          uid: 'role-1',
+          name: 'fixed:reports:reader',
+          displayName: 'Report reader',
+          description: 'Read all reports.',
+          group: 'Reports',
+          hidden: false,
+          updated: '2026-08-30T00:00:00Z',
+          created: '2026-08-30T00:00:00Z',
+          global: false,
+        },
+      ]))
+      .mockResolvedValueOnce(am({
+        version: 4,
+        uid: 'role-1',
+        name: 'fixed:reports:reader',
+        displayName: 'Report reader',
+        description: 'Read all reports.',
+        group: 'Reports',
+        hidden: false,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+        permissions: [{ action: 'reports:read', scope: 'reports:*' }],
+      }))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListDashboardPermissions('dash-1')).toMatchObject({
+      connected: true,
+      items: [
+        { role: 'Viewer', permissionName: 'View', uid: 'dash-1' },
+        { userId: 10, userLogin: 'alice', permissionName: 'Admin' },
+      ],
+    })
+    expect(await client.grafanaListAccessControlRoles({ includeHidden: true })).toMatchObject({
+      connected: true,
+      items: [{ uid: 'role-1', name: 'fixed:reports:reader', displayName: 'Report reader' }],
+    })
+    expect(await client.grafanaGetAccessControlRole('role-1')).toMatchObject({
+      connected: true,
+      item: {
+        uid: 'role-1',
+        version: 4,
+        permissionsJson: expect.stringContaining('reports:read'),
+      },
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/dashboards/uid/dash-1/permissions',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/roles?includeHidden=true',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://grafana:3000/api/access-control/roles/role-1',
+    )
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({

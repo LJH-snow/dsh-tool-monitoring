@@ -7,11 +7,13 @@ import {
   type AlertmanagerAlertItem,
   type AlertmanagerGroupItem,
   type AlertmanagerSilenceItem,
+  type GrafanaAccessControlRoleItem,
   type GrafanaAlertRuleItem,
   type GrafanaAlertInstanceItem,
   type GrafanaAnnotationItem,
   type GrafanaContactPointItem,
   type GrafanaDashboardData,
+  type GrafanaDashboardPermissionItem,
   type GrafanaDashboardSummaryItem,
   type GrafanaDatasourceItem,
   type GrafanaDatasourcePermissionItem,
@@ -2190,6 +2192,110 @@ export function createTools(client: MonitoringClient) {
         })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_dashboard_permissions',
+      description: 'List permissions for one Grafana dashboard by UID, including user, team, and built-in role grants.',
+      parameters: {
+        dashboardUid: { type: 'string', required: true, description: 'Grafana dashboard UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaDashboardPermissionItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaDashboardPermissions(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana dashboard permissions ${args.dashboardUid ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} permission(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListDashboardPermissions(args.dashboardUid as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_access_control_roles',
+      description: 'List Grafana access control roles with version, display name, group, and global state, optionally including hidden roles.',
+      parameters: {
+        includeHidden: { type: 'boolean', description: 'Include hidden roles when true' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaAccessControlRoleItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAccessControlRoles(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana access control roles', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} role(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListAccessControlRoles({
+          includeHidden: args.includeHidden,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_access_control_role',
+      description: 'Get one Grafana access control role by UID with permissions, scopes, version, and timestamps.',
+      parameters: {
+        roleUid: { type: 'string', required: true, description: 'Grafana access control role UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaAccessControlRoleItemSchema,
+          },
+        },
+        render: (_args, value) => renderGrafanaAccessControlRole(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana access control role ${args.roleUid ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { name?: string } }
+        return { card: 'generic', title: v.connected ? `Role ${v.item?.name ?? ''}` : 'Grafana unavailable' }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetAccessControlRole(args.roleUid as string, { signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -2480,6 +2586,48 @@ const grafanaDatasourcePermissionItemSchema = {
     builtInRole: { type: 'string' },
     actionsJson: { type: 'string' },
     permission: { type: 'string' },
+  },
+} as const
+
+const grafanaDashboardPermissionItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    dashboardId: { type: 'number' },
+    created: { type: 'string' },
+    updated: { type: 'string' },
+    userId: { type: 'number' },
+    userLogin: { type: 'string' },
+    userEmail: { type: 'string' },
+    teamId: { type: 'number' },
+    team: { type: 'string' },
+    role: { type: 'string' },
+    permission: { type: 'number' },
+    permissionName: { type: 'string' },
+    uid: { type: 'string' },
+    title: { type: 'string' },
+    slug: { type: 'string' },
+    isFolder: { type: 'boolean' },
+    url: { type: 'string' },
+  },
+} as const
+
+const grafanaAccessControlRoleItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    version: { type: 'number' },
+    uid: { type: 'string' },
+    name: { type: 'string' },
+    displayName: { type: 'string' },
+    description: { type: 'string' },
+    group: { type: 'string' },
+    hidden: { type: 'boolean' },
+    updated: { type: 'string' },
+    created: { type: 'string' },
+    global: { type: 'boolean' },
+    permissionsJson: { type: 'string' },
   },
 } as const
 
@@ -2863,4 +3011,30 @@ function renderGrafanaDatasourcePermissions(items: Array<Partial<GrafanaDatasour
         : `role=${permission.builtInRole ?? permission.roleName ?? 'unknown'}`
     return `${principal} permission=${permission.permission ?? ''} managed=${permission.isManaged ? 'yes' : 'no'} inherited=${permission.isInherited ? 'yes' : 'no'} actions=${permission.actionsJson ?? '[]'}`
   }).join('\n'))
+}
+
+function renderGrafanaDashboardPermissions(items: Array<Partial<GrafanaDashboardPermissionItem>>) {
+  if (!items.length) return text('No Grafana dashboard permissions found.')
+  return text(items.map(permission => {
+    const principal = permission.userLogin
+      ? `user=${permission.userLogin}`
+      : permission.team
+        ? `team=${permission.team}`
+        : `role=${permission.role ?? 'unknown'}`
+    return `${principal} permission=${permission.permissionName ?? permission.permission ?? 'unknown'}`
+  }).join('\n'))
+}
+
+function renderGrafanaAccessControlRoles(items: Array<Partial<GrafanaAccessControlRoleItem>>) {
+  if (!items.length) return text('No Grafana access control roles found.')
+  return text(items.map(role =>
+    `${role.name ?? ''} ${role.displayName ?? ''} group=${role.group ?? ''} global=${role.global ? 'yes' : 'no'} version=${role.version ?? 0}`,
+  ).join('\n'))
+}
+
+function renderGrafanaAccessControlRole(value: { connected?: boolean; reason?: string; item?: Partial<GrafanaAccessControlRoleItem> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  const item = value.item
+  if (!item?.uid && !item?.name) return text('No Grafana access control role found.')
+  return text(`${item.name ?? ''} (${item.uid ?? ''})\ndisplayName: ${item.displayName ?? ''}\ngroup: ${item.group ?? ''}\nglobal: ${item.global ? 'yes' : 'no'}\nversion: ${item.version ?? 0}\n${item.permissionsJson ?? '{}'}`)
 }

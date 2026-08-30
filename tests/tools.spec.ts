@@ -26,6 +26,7 @@ describe('tool definitions', () => {
       'alertmanager_list_receivers',
       'alertmanager_list_silences',
       'alertmanager_send_alerts',
+      'grafana_get_access_control_role',
       'grafana_get_alert_rule',
       'grafana_get_dashboard',
       'grafana_get_datasource',
@@ -33,10 +34,12 @@ describe('tool definitions', () => {
       'grafana_get_notification_policy',
       'grafana_get_service_account',
       'grafana_get_team',
+      'grafana_list_access_control_roles',
       'grafana_list_alert_instances',
       'grafana_list_alert_rules',
       'grafana_list_annotations',
       'grafana_list_contact_points',
+      'grafana_list_dashboard_permissions',
       'grafana_list_datasource_permissions',
       'grafana_list_datasources',
       'grafana_list_folder_permissions',
@@ -584,6 +587,86 @@ describe('tool definitions', () => {
     )
     expect(fetchImpl.mock.calls[1][0]).toBe(
       'http://grafana:3000/api/access-control/datasources/ds-1?ds_type=prometheus',
+    )
+  })
+
+  it('executes Grafana dashboard permission and access control role read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json([
+        {
+          id: 1,
+          dashboardId: -1,
+          created: '2026-08-30T00:00:00Z',
+          updated: '2026-08-30T01:00:00Z',
+          userId: 0,
+          userLogin: '',
+          userEmail: '',
+          teamId: 0,
+          team: '',
+          role: 'Viewer',
+          permission: 1,
+          permissionName: 'View',
+          uid: 'dash-1',
+          title: '',
+          slug: '',
+          isFolder: false,
+          url: '',
+        },
+      ]))
+      .mockResolvedValueOnce(json([
+        {
+          version: 3,
+          uid: 'role-1',
+          name: 'fixed:reports:reader',
+          displayName: 'Report reader',
+          description: 'Read all reports.',
+          group: 'Reports',
+          hidden: false,
+          updated: '2026-08-30T00:00:00Z',
+          created: '2026-08-30T00:00:00Z',
+          global: false,
+        },
+      ]))
+      .mockResolvedValueOnce(json({
+        version: 4,
+        uid: 'role-1',
+        name: 'fixed:reports:reader',
+        displayName: 'Report reader',
+        description: 'Read all reports.',
+        group: 'Reports',
+        hidden: false,
+        updated: '2026-08-30T00:00:00Z',
+        created: '2026-08-30T00:00:00Z',
+        global: false,
+        permissions: [{ action: 'reports:read', scope: 'reports:*' }],
+      }))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect((await map.grafana_list_dashboard_permissions.execute({ dashboardUid: 'dash-1' }, exec()))).toMatchObject({
+      connected: true,
+      items: [{ role: 'Viewer', permissionName: 'View', uid: 'dash-1' }],
+    })
+    expect((await map.grafana_list_access_control_roles.execute({
+      includeHidden: true,
+    }, exec())).items[0]).toMatchObject({
+      uid: 'role-1',
+      name: 'fixed:reports:reader',
+      displayName: 'Report reader',
+    })
+    expect((await map.grafana_get_access_control_role.execute({ roleUid: 'role-1' }, exec())).item).toMatchObject({
+      uid: 'role-1',
+      version: 4,
+      permissionsJson: expect.stringContaining('reports:read'),
+    })
+    expect(fetchImpl.mock.calls.length).toBe(3)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/dashboards/uid/dash-1/permissions',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/roles?includeHidden=true',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://grafana:3000/api/access-control/roles/role-1',
     )
   })
 
