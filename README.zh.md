@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、管理统计、数据源、插件、面板、目录、注解、告警规则、告警实例、服务账号、团队、组织用户、组织配额、目录/面板/数据源权限、access control 角色、面板版本与快照、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、管理统计、数据源、插件、面板、目录、注解、告警规则、告警实例、服务账号、团队、组织用户、组织配额、目录/面板/数据源权限、access control 角色与用户/团队权限、组织偏好、当前用户上下文、面板版本与快照、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
 
 插件遵循官方「一切皆插件」架构，通过 `ctx.tools.register(defineTool(...))` 注册模型可见工具，并符合 [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) 契约。
 
@@ -104,12 +104,17 @@ Grafana 工具：
 | `grafana_get_alert_rule` | 按 UID 查看单个告警规则与查询数据 JSON | 否 |
 | `grafana_get_access_control_role` | 按 UID 查看单个 Grafana access control 角色及权限与 scope | 否 |
 | `grafana_list_access_control_roles` | 查看 Grafana access control 角色，可选包含隐藏角色 | 否 |
+| `grafana_list_access_control_user_permissions` | 查看单个 Grafana 用户的有效 access control 权限，可选 scope 过滤 | 否 |
+| `grafana_list_access_control_team_permissions` | 查看单个 Grafana 团队的有效 access control 权限，可选 scope 过滤 | 否 |
 | `grafana_list_contact_points` | 查看 Grafana contact point 与安全 settings 元数据 | 否 |
 | `grafana_get_notification_policy` | 查看当前 Grafana 通知策略树 | 否 |
 | `grafana_list_teams` | 按 query、精确名称、排序与分页搜索 Grafana 团队 | 否 |
 | `grafana_get_team` | 按 ID 查看单个 Grafana 团队 | 否 |
 | `grafana_list_team_members` | 查看某个 Grafana 团队的成员 | 否 |
 | `grafana_list_org_users` | 查看当前组织用户、角色与最近活跃信息 | 否 |
+| `grafana_get_org_preferences` | 查看当前 Grafana 组织偏好，含主题、首页面板、时区与周起始 | 否 |
+| `grafana_get_current_user` | 查看当前 Grafana 用户资料与管理标志 | 否 |
+| `grafana_list_current_user_orgs` | 查看当前用户可访问的 Grafana 组织 | 否 |
 | `grafana_list_service_accounts` | 按 query 与分页搜索 Grafana 服务账号，含角色、token 数与 access control 信息 | 否 |
 | `grafana_get_service_account` | 按 ID 查看单个 Grafana 服务账号，含角色、token 数与 access control 信息 | 否 |
 | `grafana_list_service_account_tokens` | 查看某个 Grafana 服务账号的 token，含创建、过期与失效状态 | 否 |

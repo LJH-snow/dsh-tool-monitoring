@@ -491,6 +491,43 @@ export interface GrafanaDashboardSnapshotItem {
   updatedAt: string
 }
 
+export interface GrafanaAccessControlPermissionItem {
+  action: string
+  scope: string
+}
+
+export interface GrafanaOrgPreferencesData {
+  connected: boolean
+  theme: string
+  homeDashboardUid: string
+  timezone: string
+  weekStart: string
+  prefsJson: string
+}
+
+export interface GrafanaCurrentUserData {
+  connected: boolean
+  id: number
+  login: string
+  email: string
+  name: string
+  orgId: number
+  isGrafanaAdmin: boolean
+  isDisabled: boolean
+  isExternal: boolean
+  updatedAt: string
+  createdAt: string
+  theme: string
+  authLabelsJson: string
+  userJson: string
+}
+
+export interface GrafanaUserOrgItem {
+  orgId: number
+  name: string
+  role: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -1010,6 +1047,55 @@ function mapGrafanaDashboardSnapshot(data: unknown): GrafanaDashboardSnapshotIte
     expires: asString(record, 'expires'),
     createdAt: asString(record, 'createdAt'),
     updatedAt: asString(record, 'updatedAt'),
+  }
+}
+
+function mapGrafanaAccessControlPermission(data: unknown): GrafanaAccessControlPermissionItem {
+  const record = asRecord(data)
+  return {
+    action: asString(record, 'action'),
+    scope: asString(record, 'scope'),
+  }
+}
+
+function mapGrafanaOrgPreferences(data: unknown): GrafanaOrgPreferencesData {
+  const record = asRecord(data)
+  return {
+    connected: true,
+    theme: asString(record, 'theme'),
+    homeDashboardUid: asString(record, 'homeDashboardUID') || asString(record, 'home_dashboard_uid'),
+    timezone: asString(record, 'timezone'),
+    weekStart: asString(record, 'weekStart') || asString(record, 'week_start'),
+    prefsJson: JSON.stringify(data ?? {}),
+  }
+}
+
+function mapGrafanaCurrentUser(data: unknown): GrafanaCurrentUserData {
+  const record = asRecord(data)
+  return {
+    connected: true,
+    id: asNumber(record, 'id'),
+    login: asString(record, 'login'),
+    email: asString(record, 'email'),
+    name: asString(record, 'name'),
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    isGrafanaAdmin: asBoolean(record, 'isGrafanaAdmin'),
+    isDisabled: asBoolean(record, 'isDisabled'),
+    isExternal: asBoolean(record, 'isExternal'),
+    updatedAt: asString(record, 'updatedAt'),
+    createdAt: asString(record, 'createdAt'),
+    theme: asString(record, 'theme'),
+    authLabelsJson: toJson(record.authLabels),
+    userJson: JSON.stringify(data ?? {}),
+  }
+}
+
+function mapGrafanaUserOrg(data: unknown): GrafanaUserOrgItem {
+  const record = asRecord(data)
+  return {
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    name: asString(record, 'name'),
+    role: asString(record, 'role'),
   }
 }
 
@@ -2226,6 +2312,59 @@ export class MonitoringClient {
       options.signal,
     )
     const items = asArray(data).map(mapGrafanaDashboardSnapshot)
+    return { connected: true, items }
+  }
+
+  async grafanaListAccessControlUserPermissions(
+    userId: string | number,
+    options: { scope?: string; signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaAccessControlPermissionItem[]
+  }> {
+    const suffix = options.scope ? `?scope=${encodeURIComponent(options.scope)}` : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/access-control/users/${encodeURIComponent(String(userId))}/permissions${suffix}`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaAccessControlPermission)
+    return { connected: true, items }
+  }
+
+  async grafanaListAccessControlTeamPermissions(
+    teamId: string | number,
+    options: { scope?: string; signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaAccessControlPermissionItem[]
+  }> {
+    const suffix = options.scope ? `?scope=${encodeURIComponent(options.scope)}` : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/access-control/teams/${encodeURIComponent(String(teamId))}/permissions${suffix}`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaAccessControlPermission)
+    return { connected: true, items }
+  }
+
+  async grafanaGetOrgPreferences(options: { signal?: AbortSignal } = {}): Promise<GrafanaOrgPreferencesData> {
+    const data = await this.grafanaRequest('GET', '/api/org/preferences', options.signal)
+    return mapGrafanaOrgPreferences(data)
+  }
+
+  async grafanaGetCurrentUser(options: { signal?: AbortSignal } = {}): Promise<GrafanaCurrentUserData> {
+    const data = await this.grafanaRequest('GET', '/api/user', options.signal)
+    return mapGrafanaCurrentUser(data)
+  }
+
+  async grafanaListCurrentUserOrgs(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaUserOrgItem[]
+  }> {
+    const data = await this.grafanaRequest('GET', '/api/user/orgs', options.signal)
+    const items = asArray(data).map(mapGrafanaUserOrg)
     return { connected: true, items }
   }
 

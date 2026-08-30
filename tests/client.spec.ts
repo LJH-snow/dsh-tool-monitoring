@@ -1022,6 +1022,88 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/dashboard/snapshots')
   })
 
+  it('maps Grafana access control permissions, org preferences, and current user context', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am([
+        { action: 'reports:read', scope: 'reports:*' },
+        { action: 'dashboards:read', scope: 'dashboards:uid:dash-1' },
+      ]))
+      .mockResolvedValueOnce(am([
+        { action: 'dashboards:edit', scope: 'dashboards:*' },
+      ]))
+      .mockResolvedValueOnce(am({
+        theme: 'dark',
+        homeDashboardUID: 'dash-1',
+        timezone: 'utc',
+        weekStart: 'monday',
+      }))
+      .mockResolvedValueOnce(am({
+        id: 10,
+        login: 'alice',
+        email: 'alice@example.com',
+        name: 'Alice',
+        orgId: 1,
+        isGrafanaAdmin: true,
+        isDisabled: false,
+        isExternal: false,
+        updatedAt: '2026-08-30T00:00:00Z',
+        createdAt: '2026-08-01T00:00:00Z',
+        theme: 'dark',
+        authLabels: ['ldap'],
+      }))
+      .mockResolvedValueOnce(am([
+        { orgId: 1, name: 'Main', role: 'Admin' },
+        { orgId: 2, name: 'Ops', role: 'Viewer' },
+      ]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect((await client.grafanaListAccessControlUserPermissions(10, {
+      scope: 'reports:*',
+    })).items).toMatchObject([
+      { action: 'reports:read', scope: 'reports:*' },
+      { action: 'dashboards:read', scope: 'dashboards:uid:dash-1' },
+    ])
+    expect((await client.grafanaListAccessControlTeamPermissions(5)).items[0]).toMatchObject({
+      action: 'dashboards:edit',
+      scope: 'dashboards:*',
+    })
+    expect(await client.grafanaGetOrgPreferences()).toMatchObject({
+      connected: true,
+      theme: 'dark',
+      homeDashboardUid: 'dash-1',
+      timezone: 'utc',
+      weekStart: 'monday',
+    })
+    expect(await client.grafanaGetCurrentUser()).toMatchObject({
+      connected: true,
+      id: 10,
+      login: 'alice',
+      email: 'alice@example.com',
+      orgId: 1,
+      isGrafanaAdmin: true,
+      authLabelsJson: expect.stringContaining('ldap'),
+    })
+    expect((await client.grafanaListCurrentUserOrgs()).items).toMatchObject([
+      { orgId: 1, name: 'Main', role: 'Admin' },
+      { orgId: 2, name: 'Ops', role: 'Viewer' },
+    ])
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/access-control/users/10/permissions?scope=reports%3A*',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/teams/5/permissions',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/org/preferences')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/user')
+    expect(fetchImpl.mock.calls[4][0]).toBe('http://grafana:3000/api/user/orgs')
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({

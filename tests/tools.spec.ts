@@ -29,17 +29,22 @@ describe('tool definitions', () => {
       'grafana_get_access_control_role',
       'grafana_get_admin_stats',
       'grafana_get_alert_rule',
+      'grafana_get_current_user',
       'grafana_get_dashboard',
       'grafana_get_datasource',
       'grafana_get_health',
       'grafana_get_notification_policy',
+      'grafana_get_org_preferences',
       'grafana_get_service_account',
       'grafana_get_team',
       'grafana_list_access_control_roles',
+      'grafana_list_access_control_team_permissions',
+      'grafana_list_access_control_user_permissions',
       'grafana_list_alert_instances',
       'grafana_list_alert_rules',
       'grafana_list_annotations',
       'grafana_list_contact_points',
+      'grafana_list_current_user_orgs',
       'grafana_list_dashboard_permissions',
       'grafana_list_dashboard_snapshots',
       'grafana_list_dashboard_versions',
@@ -767,6 +772,77 @@ describe('tool definitions', () => {
       'http://grafana:3000/api/dashboards/uid/dash-1/versions?limit=5&start=0',
     )
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/dashboard/snapshots')
+  })
+
+  it('executes Grafana access control and identity audit read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json([
+        { action: 'reports:read', scope: 'reports:*' },
+        { action: 'dashboards:read', scope: 'dashboards:uid:dash-1' },
+      ]))
+      .mockResolvedValueOnce(json([
+        { action: 'dashboards:edit', scope: 'dashboards:*' },
+      ]))
+      .mockResolvedValueOnce(json({
+        theme: 'dark',
+        homeDashboardUID: 'dash-1',
+        timezone: 'utc',
+        weekStart: 'monday',
+      }))
+      .mockResolvedValueOnce(json({
+        id: 10,
+        login: 'alice',
+        email: 'alice@example.com',
+        name: 'Alice',
+        orgId: 1,
+        isGrafanaAdmin: true,
+        isDisabled: false,
+        isExternal: false,
+        updatedAt: '2026-08-30T00:00:00Z',
+        createdAt: '2026-08-01T00:00:00Z',
+        theme: 'dark',
+        authLabels: ['ldap'],
+      }))
+      .mockResolvedValueOnce(json([
+        { orgId: 1, name: 'Main', role: 'Admin' },
+        { orgId: 2, name: 'Ops', role: 'Viewer' },
+      ]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect((await map.grafana_list_access_control_user_permissions.execute({
+      userId: 10,
+      scope: 'reports:*',
+    }, exec())).items[0]).toMatchObject({ action: 'reports:read', scope: 'reports:*' })
+    expect((await map.grafana_list_access_control_team_permissions.execute({
+      teamId: 5,
+    }, exec())).items[0]).toMatchObject({ action: 'dashboards:edit', scope: 'dashboards:*' })
+    expect(await map.grafana_get_org_preferences.execute({}, exec())).toMatchObject({
+      connected: true,
+      theme: 'dark',
+      homeDashboardUid: 'dash-1',
+      timezone: 'utc',
+      weekStart: 'monday',
+    })
+    expect(await map.grafana_get_current_user.execute({}, exec())).toMatchObject({
+      connected: true,
+      login: 'alice',
+      isGrafanaAdmin: true,
+      authLabelsJson: expect.stringContaining('ldap'),
+    })
+    expect((await map.grafana_list_current_user_orgs.execute({}, exec())).items).toMatchObject([
+      { orgId: 1, name: 'Main', role: 'Admin' },
+      { orgId: 2, name: 'Ops', role: 'Viewer' },
+    ])
+    expect(fetchImpl.mock.calls.length).toBe(5)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/access-control/users/10/permissions?scope=reports%3A*',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/teams/5/permissions',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/org/preferences')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/user')
+    expect(fetchImpl.mock.calls[4][0]).toBe('http://grafana:3000/api/user/orgs')
   })
 
   it('executes Loki detected field and Grafana alert observation tools', async () => {

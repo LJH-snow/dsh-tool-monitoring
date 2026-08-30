@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, admin stats, datasources, plugins, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder, dashboard and datasource permissions, access control roles, dashboard versions and snapshots, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, admin stats, datasources, plugins, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder, dashboard and datasource permissions, access control roles and user/team permissions, org preferences, current user context, dashboard versions and snapshots, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -104,12 +104,17 @@ Grafana tools:
 | `grafana_get_alert_rule` | Get one Grafana alert rule by UID with query data JSON | no |
 | `grafana_get_access_control_role` | Get one Grafana access control role by UID with permissions and scopes | no |
 | `grafana_list_access_control_roles` | List Grafana access control roles, optionally including hidden roles | no |
+| `grafana_list_access_control_user_permissions` | List effective access control permissions for one Grafana user, optionally filtered by scope | no |
+| `grafana_list_access_control_team_permissions` | List effective access control permissions for one Grafana team, optionally filtered by scope | no |
 | `grafana_list_contact_points` | List Grafana contact points with safe settings metadata | no |
 | `grafana_get_notification_policy` | Get the current Grafana notification policy tree | no |
 | `grafana_list_teams` | Search Grafana teams by query, exact name, sort and pagination | no |
 | `grafana_get_team` | Get one Grafana team by ID | no |
 | `grafana_list_team_members` | List members for one Grafana team | no |
 | `grafana_list_org_users` | List Grafana org users with roles and last seen info | no |
+| `grafana_get_org_preferences` | Get current Grafana organization preferences with theme, home dashboard, timezone, and week start | no |
+| `grafana_get_current_user` | Get the current Grafana user profile and admin flags | no |
+| `grafana_list_current_user_orgs` | List Grafana organizations available to the current user | no |
 | `grafana_list_service_accounts` | Search Grafana service accounts by query and pagination, with role, token count, and access control metadata | no |
 | `grafana_get_service_account` | Get one Grafana service account by ID with role, token count, and access control metadata | no |
 | `grafana_list_service_account_tokens` | List tokens for one Grafana service account with creation, expiration, and expired state | no |

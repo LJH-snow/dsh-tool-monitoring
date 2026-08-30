@@ -4,6 +4,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
   MonitoringClient,
   MonitoringError,
+  type GrafanaAccessControlPermissionItem,
   type AlertmanagerAlertItem,
   type AlertmanagerGroupItem,
   type AlertmanagerSilenceItem,
@@ -13,6 +14,7 @@ import {
   type GrafanaAdminStatsData,
   type GrafanaAnnotationItem,
   type GrafanaContactPointItem,
+  type GrafanaCurrentUserData,
   type GrafanaDashboardData,
   type GrafanaDashboardPermissionItem,
   type GrafanaDashboardSnapshotItem,
@@ -24,6 +26,7 @@ import {
   type GrafanaFolderPermissionItem,
   type GrafanaHealthData,
   type GrafanaNotificationPolicyData,
+  type GrafanaOrgPreferencesData,
   type GrafanaOrgUserItem,
   type GrafanaOrgQuotaItem,
   type GrafanaPluginItem,
@@ -33,6 +36,7 @@ import {
   type GrafanaTeamData,
   type GrafanaTeamItem,
   type GrafanaTeamMemberItem,
+  type GrafanaUserOrgItem,
   type LokiDetectedFieldItem,
   type LokiAlertItem,
   type LokiIndexStats,
@@ -2451,6 +2455,193 @@ export function createTools(client: MonitoringClient) {
         return client.grafanaListDashboardSnapshots({ signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_access_control_user_permissions',
+      description: 'List effective Grafana access control permissions for one user by user ID, optionally filtered by scope.',
+      parameters: {
+        userId: { type: 'integer', required: true, description: 'Grafana user ID' },
+        scope: { type: 'string', description: 'Optional scope filter for permission entries' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaAccessControlPermissionItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAccessControlPermissions(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana user permissions ${args.userId ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} permission(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListAccessControlUserPermissions(args.userId as number, {
+          scope: args.scope,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_access_control_team_permissions',
+      description: 'List effective Grafana access control permissions for one team by team ID, optionally filtered by scope.',
+      parameters: {
+        teamId: { type: 'integer', required: true, description: 'Grafana team ID' },
+        scope: { type: 'string', description: 'Optional scope filter for permission entries' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaAccessControlPermissionItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaAccessControlPermissions(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana team permissions ${args.teamId ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} permission(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListAccessControlTeamPermissions(args.teamId as number, {
+          scope: args.scope,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_org_preferences',
+      description: 'Get current Grafana organization preferences including theme, home dashboard UID, timezone, and week start.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            theme: { type: 'string' },
+            homeDashboardUid: { type: 'string' },
+            timezone: { type: 'string' },
+            weekStart: { type: 'string' },
+            prefsJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderGrafanaOrgPreferences(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana org preferences', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; theme?: string }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `Org theme ${v.theme ?? ''}` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetOrgPreferences({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_current_user',
+      description: 'Get the current Grafana user profile with login, email, organization, admin flags, and authentication labels.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            id: { type: 'number' },
+            login: { type: 'string' },
+            email: { type: 'string' },
+            name: { type: 'string' },
+            orgId: { type: 'number' },
+            isGrafanaAdmin: { type: 'boolean' },
+            isDisabled: { type: 'boolean' },
+            isExternal: { type: 'boolean' },
+            updatedAt: { type: 'string' },
+            createdAt: { type: 'string' },
+            theme: { type: 'string' },
+            authLabelsJson: { type: 'string' },
+            userJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderGrafanaCurrentUser(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana current user', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; login?: string }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `User ${v.login ?? ''}` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetCurrentUser({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_current_user_orgs',
+      description: 'List Grafana organizations available to the current user with role membership.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaUserOrgItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaUserOrgs(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana current user orgs', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} org(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListCurrentUserOrgs({ signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -2834,6 +3025,25 @@ const grafanaDashboardSnapshotItemSchema = {
     expires: { type: 'string' },
     createdAt: { type: 'string' },
     updatedAt: { type: 'string' },
+  },
+} as const
+
+const grafanaAccessControlPermissionItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: { type: 'string' },
+    scope: { type: 'string' },
+  },
+} as const
+
+const grafanaUserOrgItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    orgId: { type: 'number' },
+    name: { type: 'string' },
+    role: { type: 'string' },
   },
 } as const
 
@@ -3280,5 +3490,29 @@ function renderGrafanaDashboardSnapshots(items: Array<Partial<GrafanaDashboardSn
   if (!items.length) return text('No Grafana dashboard snapshots found.')
   return text(items.map(snapshot =>
     `${snapshot.name ?? ''} key=${snapshot.key ?? ''} owner=${snapshot.userId ?? 0} external=${snapshot.external ? 'yes' : 'no'} expires=${snapshot.expires ?? ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaAccessControlPermissions(items: Array<Partial<GrafanaAccessControlPermissionItem>>) {
+  if (!items.length) return text('No Grafana access control permissions found.')
+  return text(items.map(permission =>
+    `${permission.action ?? ''} ${permission.scope ?? ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaOrgPreferences(value: Partial<GrafanaOrgPreferencesData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  return text(`theme: ${value.theme ?? ''}\nhomeDashboard: ${value.homeDashboardUid ?? ''}\ntimezone: ${value.timezone ?? ''}\nweekStart: ${value.weekStart ?? ''}\n${value.prefsJson ?? '{}'}`)
+}
+
+function renderGrafanaCurrentUser(value: Partial<GrafanaCurrentUserData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  return text(`login: ${value.login ?? ''}\nemail: ${value.email ?? ''}\nname: ${value.name ?? ''}\norg: ${value.orgId ?? 0}\nadmin: ${value.isGrafanaAdmin ? 'yes' : 'no'}\ndisabled: ${value.isDisabled ? 'yes' : 'no'}\n${value.userJson ?? '{}'}`)
+}
+
+function renderGrafanaUserOrgs(items: Array<Partial<GrafanaUserOrgItem>>) {
+  if (!items.length) return text('No Grafana user organizations found.')
+  return text(items.map(org =>
+    `${org.name ?? ''} (${org.orgId ?? 0}) role=${org.role ?? 'unknown'}`,
   ).join('\n'))
 }
