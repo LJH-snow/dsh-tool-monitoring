@@ -433,6 +433,64 @@ export interface GrafanaAccessControlRoleItem {
   permissionsJson: string
 }
 
+export interface GrafanaAdminStatsData {
+  connected: boolean
+  users: number
+  orgs: number
+  dashboards: number
+  snapshots: number
+  tags: number
+  datasources: number
+  playlists: number
+  stars: number
+  alerts: number
+  activeAdmins: number
+  activeEditors: number
+  activeViewers: number
+  activeUsers: number
+  activeSessions: number
+  statsJson: string
+}
+
+export interface GrafanaPluginItem {
+  id: string
+  type: string
+  name: string
+  version: string
+  enabled: boolean
+  pinned: boolean
+  hasUpdate: boolean
+  state: string
+  signature: string
+  infoJson: string
+}
+
+export interface GrafanaDashboardVersionItem {
+  id: number
+  dashboardId: number
+  version: number
+  parentVersion: number
+  description: string
+  message: string
+  created: string
+  updated: string
+  createdBy: string
+  updatedBy: string
+}
+
+export interface GrafanaDashboardSnapshotItem {
+  id: number
+  name: string
+  key: string
+  orgId: number
+  userId: number
+  external: boolean
+  externalUrl: string
+  expires: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -904,6 +962,54 @@ function mapGrafanaAccessControlRole(data: unknown): GrafanaAccessControlRoleIte
     created: asString(record, 'created'),
     global: asBoolean(record, 'global'),
     permissionsJson: toJson(record.permissions),
+  }
+}
+
+function mapGrafanaPlugin(data: unknown): GrafanaPluginItem {
+  const record = asRecord(data)
+  return {
+    id: asString(record, 'id'),
+    type: asString(record, 'type'),
+    name: asString(record, 'name'),
+    version: asString(record, 'version') || asString(record, 'pluginVersion'),
+    enabled: asBoolean(record, 'enabled'),
+    pinned: asBoolean(record, 'pinned'),
+    hasUpdate: asBoolean(record, 'hasUpdate'),
+    state: asString(record, 'state'),
+    signature: asString(record, 'signature'),
+    infoJson: toJson(record.info),
+  }
+}
+
+function mapGrafanaDashboardVersion(data: unknown): GrafanaDashboardVersionItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    dashboardId: asNumber(record, 'dashboardId') || asNumber(record, 'dashboardID'),
+    version: asNumber(record, 'version'),
+    parentVersion: asNumber(record, 'parentVersion') || asNumber(record, 'parent_version'),
+    description: asString(record, 'description'),
+    message: asString(record, 'message'),
+    created: asString(record, 'created'),
+    updated: asString(record, 'updated'),
+    createdBy: asString(record, 'createdBy') || asString(record, 'created_by'),
+    updatedBy: asString(record, 'updatedBy') || asString(record, 'updated_by'),
+  }
+}
+
+function mapGrafanaDashboardSnapshot(data: unknown): GrafanaDashboardSnapshotItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    name: asString(record, 'name'),
+    key: asString(record, 'key'),
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    userId: asNumber(record, 'userId') || asNumber(record, 'userID'),
+    external: asBoolean(record, 'external'),
+    externalUrl: asString(record, 'externalUrl'),
+    expires: asString(record, 'expires'),
+    createdAt: asString(record, 'createdAt'),
+    updatedAt: asString(record, 'updatedAt'),
   }
 }
 
@@ -2053,6 +2159,74 @@ export class MonitoringClient {
       options.signal,
     )
     return { connected: true, item: mapGrafanaAccessControlRole(data) }
+  }
+
+  async grafanaGetAdminStats(options: { signal?: AbortSignal } = {}): Promise<GrafanaAdminStatsData> {
+    const data = asRecord(await this.grafanaRequest('GET', '/api/admin/stats', options.signal))
+    return {
+      connected: true,
+      users: asNumber(data, 'users'),
+      orgs: asNumber(data, 'orgs'),
+      dashboards: asNumber(data, 'dashboards'),
+      snapshots: asNumber(data, 'snapshots'),
+      tags: asNumber(data, 'tags'),
+      datasources: asNumber(data, 'datasources'),
+      playlists: asNumber(data, 'playlists'),
+      stars: asNumber(data, 'stars'),
+      alerts: asNumber(data, 'alerts'),
+      activeAdmins: asNumber(data, 'activeAdmins'),
+      activeEditors: asNumber(data, 'activeEditors'),
+      activeViewers: asNumber(data, 'activeViewers'),
+      activeUsers: asNumber(data, 'activeUsers'),
+      activeSessions: asNumber(data, 'activeSessions'),
+      statsJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async grafanaListPlugins(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaPluginItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/plugins?embedded=true',
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaPlugin)
+    return { connected: true, items }
+  }
+
+  async grafanaListDashboardVersions(
+    uid: string,
+    options: { limit?: number; start?: number; signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaDashboardVersionItem[]
+  }> {
+    const params: string[] = []
+    if (options.limit && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    if (options.start !== undefined && options.start >= 0) params.push(`start=${Math.floor(options.start)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/dashboards/uid/${encodeURIComponent(uid)}/versions${suffix}`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaDashboardVersion)
+    return { connected: true, items }
+  }
+
+  async grafanaListDashboardSnapshots(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaDashboardSnapshotItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      '/api/dashboard/snapshots',
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaDashboardSnapshot)
+    return { connected: true, items }
   }
 
   async deleteSeries(

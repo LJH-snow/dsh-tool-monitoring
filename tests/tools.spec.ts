@@ -27,6 +27,7 @@ describe('tool definitions', () => {
       'alertmanager_list_silences',
       'alertmanager_send_alerts',
       'grafana_get_access_control_role',
+      'grafana_get_admin_stats',
       'grafana_get_alert_rule',
       'grafana_get_dashboard',
       'grafana_get_datasource',
@@ -40,12 +41,15 @@ describe('tool definitions', () => {
       'grafana_list_annotations',
       'grafana_list_contact_points',
       'grafana_list_dashboard_permissions',
+      'grafana_list_dashboard_snapshots',
+      'grafana_list_dashboard_versions',
       'grafana_list_datasource_permissions',
       'grafana_list_datasources',
       'grafana_list_folder_permissions',
       'grafana_list_folders',
       'grafana_list_org_quotas',
       'grafana_list_org_users',
+      'grafana_list_plugins',
       'grafana_list_service_account_tokens',
       'grafana_list_service_accounts',
       'grafana_list_team_members',
@@ -668,6 +672,101 @@ describe('tool definitions', () => {
     expect(fetchImpl.mock.calls[2][0]).toBe(
       'http://grafana:3000/api/access-control/roles/role-1',
     )
+  })
+
+  it('executes Grafana instance and dashboard audit read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({
+        users: 3,
+        orgs: 2,
+        dashboards: 12,
+        snapshots: 2,
+        tags: 8,
+        datasources: 5,
+        playlists: 1,
+        stars: 4,
+        alerts: 6,
+        activeAdmins: 1,
+        activeEditors: 2,
+        activeViewers: 5,
+        activeUsers: 8,
+        activeSessions: 9,
+      }))
+      .mockResolvedValueOnce(json([{
+        id: 'grafana-piechart-panel',
+        type: 'panel',
+        name: 'Pie Chart',
+        version: '2.0.0',
+        enabled: true,
+        pinned: false,
+        hasUpdate: false,
+        state: 'beta',
+        signature: 'valid',
+        info: { logos: { small: '/avatar/pie' } },
+      }]))
+      .mockResolvedValueOnce(json([{
+        id: 101,
+        dashboardId: 1,
+        version: 3,
+        parentVersion: 2,
+        description: 'Updated panel',
+        message: 'tuned thresholds',
+        created: '2026-08-30T00:00:00Z',
+        updated: '2026-08-30T01:00:00Z',
+        createdBy: 'alice',
+        updatedBy: 'alice',
+      }]))
+      .mockResolvedValueOnce(json([{
+        id: 201,
+        name: 'ops-live',
+        key: 'ABC123',
+        orgId: 1,
+        userId: 10,
+        external: true,
+        externalUrl: 'https://example.com/s/ABC123',
+        expires: '2026-09-01T00:00:00Z',
+        createdAt: '2026-08-30T00:00:00Z',
+        updatedAt: '2026-08-30T01:00:00Z',
+      }]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect(await map.grafana_get_admin_stats.execute({}, exec())).toMatchObject({
+      connected: true,
+      users: 3,
+      dashboards: 12,
+      activeSessions: 9,
+      statsJson: expect.stringContaining('activeAdmins'),
+    })
+    expect((await map.grafana_list_plugins.execute({}, exec())).items[0]).toMatchObject({
+      id: 'grafana-piechart-panel',
+      name: 'Pie Chart',
+      enabled: true,
+      signature: 'valid',
+      infoJson: expect.stringContaining('avatar/pie'),
+    })
+    expect((await map.grafana_list_dashboard_versions.execute({
+      dashboardUid: 'dash-1',
+      limit: 5,
+      start: 0,
+    }, exec())).items[0]).toMatchObject({
+      version: 3,
+      parentVersion: 2,
+      createdBy: 'alice',
+      message: 'tuned thresholds',
+    })
+    expect((await map.grafana_list_dashboard_snapshots.execute({}, exec())).items[0]).toMatchObject({
+      name: 'ops-live',
+      key: 'ABC123',
+      external: true,
+      externalUrl: 'https://example.com/s/ABC123',
+    })
+    expect(fetchImpl.mock.calls.length).toBe(4)
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://grafana:3000/api/admin/stats')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/plugins?embedded=true')
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://grafana:3000/api/dashboards/uid/dash-1/versions?limit=5&start=0',
+    )
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/dashboard/snapshots')
   })
 
   it('executes Loki detected field and Grafana alert observation tools', async () => {

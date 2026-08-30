@@ -10,11 +10,14 @@ import {
   type GrafanaAccessControlRoleItem,
   type GrafanaAlertRuleItem,
   type GrafanaAlertInstanceItem,
+  type GrafanaAdminStatsData,
   type GrafanaAnnotationItem,
   type GrafanaContactPointItem,
   type GrafanaDashboardData,
   type GrafanaDashboardPermissionItem,
+  type GrafanaDashboardSnapshotItem,
   type GrafanaDashboardSummaryItem,
+  type GrafanaDashboardVersionItem,
   type GrafanaDatasourceItem,
   type GrafanaDatasourcePermissionItem,
   type GrafanaFolderItem,
@@ -23,6 +26,7 @@ import {
   type GrafanaNotificationPolicyData,
   type GrafanaOrgUserItem,
   type GrafanaOrgQuotaItem,
+  type GrafanaPluginItem,
   type GrafanaServiceAccountData,
   type GrafanaServiceAccountItem,
   type GrafanaServiceAccountTokenItem,
@@ -2296,6 +2300,157 @@ export function createTools(client: MonitoringClient) {
         return client.grafanaGetAccessControlRole(args.roleUid as string, { signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'grafana_get_admin_stats',
+      description: 'Get Grafana admin stats covering users, orgs, dashboards, snapshots, datasources, playlists, stars, alerts, and active session counts.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            users: { type: 'number' },
+            orgs: { type: 'number' },
+            dashboards: { type: 'number' },
+            snapshots: { type: 'number' },
+            tags: { type: 'number' },
+            datasources: { type: 'number' },
+            playlists: { type: 'number' },
+            stars: { type: 'number' },
+            alerts: { type: 'number' },
+            activeAdmins: { type: 'number' },
+            activeEditors: { type: 'number' },
+            activeViewers: { type: 'number' },
+            activeUsers: { type: 'number' },
+            activeSessions: { type: 'number' },
+            statsJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderGrafanaAdminStats(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana admin stats', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; users?: number; dashboards?: number }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${v.users ?? 0} user(s), ${v.dashboards ?? 0} dashboard(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetAdminStats({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_plugins',
+      description: 'List Grafana plugins with type, version, enabled state, update availability, and signature state.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaPluginItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaPlugins(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana plugins', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} plugin(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListPlugins({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_dashboard_versions',
+      description: 'List version history for one Grafana dashboard by UID, including author, message, timestamps, and parent version.',
+      parameters: {
+        dashboardUid: { type: 'string', required: true, description: 'Grafana dashboard UID' },
+        limit: { type: 'integer', description: 'Maximum versions, default returned by Grafana' },
+        start: { type: 'integer', description: 'Zero-based start offset for pagination' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaDashboardVersionItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaDashboardVersions(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana dashboard versions ${args.dashboardUid ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} version(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListDashboardVersions(args.dashboardUid as string, {
+          limit: args.limit,
+          start: args.start,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_dashboard_snapshots',
+      description: 'List Grafana dashboard snapshots with name, key, owner, external state, and expiration.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaDashboardSnapshotItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaDashboardSnapshots(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana dashboard snapshots', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} snapshot(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListDashboardSnapshots({ signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -2628,6 +2783,57 @@ const grafanaAccessControlRoleItemSchema = {
     created: { type: 'string' },
     global: { type: 'boolean' },
     permissionsJson: { type: 'string' },
+  },
+} as const
+
+const grafanaPluginItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string' },
+    type: { type: 'string' },
+    name: { type: 'string' },
+    version: { type: 'string' },
+    enabled: { type: 'boolean' },
+    pinned: { type: 'boolean' },
+    hasUpdate: { type: 'boolean' },
+    state: { type: 'string' },
+    signature: { type: 'string' },
+    infoJson: { type: 'string' },
+  },
+} as const
+
+const grafanaDashboardVersionItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    dashboardId: { type: 'number' },
+    version: { type: 'number' },
+    parentVersion: { type: 'number' },
+    description: { type: 'string' },
+    message: { type: 'string' },
+    created: { type: 'string' },
+    updated: { type: 'string' },
+    createdBy: { type: 'string' },
+    updatedBy: { type: 'string' },
+  },
+} as const
+
+const grafanaDashboardSnapshotItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    name: { type: 'string' },
+    key: { type: 'string' },
+    orgId: { type: 'number' },
+    userId: { type: 'number' },
+    external: { type: 'boolean' },
+    externalUrl: { type: 'string' },
+    expires: { type: 'string' },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
   },
 } as const
 
@@ -3037,4 +3243,42 @@ function renderGrafanaAccessControlRole(value: { connected?: boolean; reason?: s
   const item = value.item
   if (!item?.uid && !item?.name) return text('No Grafana access control role found.')
   return text(`${item.name ?? ''} (${item.uid ?? ''})\ndisplayName: ${item.displayName ?? ''}\ngroup: ${item.group ?? ''}\nglobal: ${item.global ? 'yes' : 'no'}\nversion: ${item.version ?? 0}\n${item.permissionsJson ?? '{}'}`)
+}
+
+function renderGrafanaAdminStats(value: Partial<GrafanaAdminStatsData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  return text([
+    `users: ${value.users ?? 0}`,
+    `orgs: ${value.orgs ?? 0}`,
+    `dashboards: ${value.dashboards ?? 0}`,
+    `snapshots: ${value.snapshots ?? 0}`,
+    `datasources: ${value.datasources ?? 0}`,
+    `playlists: ${value.playlists ?? 0}`,
+    `stars: ${value.stars ?? 0}`,
+    `alerts: ${value.alerts ?? 0}`,
+    `active users: ${value.activeUsers ?? 0}`,
+    `active sessions: ${value.activeSessions ?? 0}`,
+    value.statsJson ?? '{}',
+  ].join('\n'))
+}
+
+function renderGrafanaPlugins(items: Array<Partial<GrafanaPluginItem>>) {
+  if (!items.length) return text('No Grafana plugins found.')
+  return text(items.map(plugin =>
+    `${plugin.id ?? ''} ${plugin.name ?? ''} ${plugin.version ?? ''} ${plugin.enabled ? 'enabled' : 'disabled'} update=${plugin.hasUpdate ? 'yes' : 'no'} signature=${plugin.signature ?? ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaDashboardVersions(items: Array<Partial<GrafanaDashboardVersionItem>>) {
+  if (!items.length) return text('No Grafana dashboard versions found.')
+  return text(items.map(version =>
+    `v${version.version ?? 0} ${version.createdBy ?? ''} ${version.created ?? ''} ${version.message ?? ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaDashboardSnapshots(items: Array<Partial<GrafanaDashboardSnapshotItem>>) {
+  if (!items.length) return text('No Grafana dashboard snapshots found.')
+  return text(items.map(snapshot =>
+    `${snapshot.name ?? ''} key=${snapshot.key ?? ''} owner=${snapshot.userId ?? 0} external=${snapshot.external ? 'yes' : 'no'} expires=${snapshot.expires ?? ''}`,
+  ).join('\n'))
 }

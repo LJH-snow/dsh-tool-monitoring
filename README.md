@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, datasources, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder, dashboard and datasource permissions, access control roles, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, admin stats, datasources, plugins, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder, dashboard and datasource permissions, access control roles, dashboard versions and snapshots, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -114,6 +114,10 @@ Grafana tools:
 | `grafana_get_service_account` | Get one Grafana service account by ID with role, token count, and access control metadata | no |
 | `grafana_list_service_account_tokens` | List tokens for one Grafana service account with creation, expiration, and expired state | no |
 | `grafana_list_org_quotas` | List current Grafana organization quotas with target, limit, and used values | no |
+| `grafana_get_admin_stats` | Read Grafana instance admin stats for users, orgs, dashboards, snapshots, datasources, and active sessions | no |
+| `grafana_list_plugins` | List installed Grafana plugins with version, enabled state, update availability, and signature state | no |
+| `grafana_list_dashboard_versions` | List version history for a Grafana dashboard by UID | no |
+| `grafana_list_dashboard_snapshots` | List Grafana dashboard snapshots with owner, external state, and expiration | no |
 
 Alertmanager tools:
 

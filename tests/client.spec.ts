@@ -904,6 +904,124 @@ describe('MonitoringClient', () => {
     )
   })
 
+  it('maps Grafana admin stats, plugins, dashboard versions, and snapshots', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am({
+        users: 3,
+        orgs: 2,
+        dashboards: 12,
+        snapshots: 2,
+        tags: 8,
+        datasources: 5,
+        playlists: 1,
+        stars: 4,
+        alerts: 6,
+        activeAdmins: 1,
+        activeEditors: 2,
+        activeViewers: 5,
+        activeUsers: 8,
+        activeSessions: 9,
+      }))
+      .mockResolvedValueOnce(am([{
+        id: 'grafana-piechart-panel',
+        type: 'panel',
+        name: 'Pie Chart',
+        version: '2.0.0',
+        enabled: true,
+        pinned: false,
+        hasUpdate: false,
+        state: 'beta',
+        signature: 'valid',
+        info: { author: { name: 'Grafana Labs' } },
+      }]))
+      .mockResolvedValueOnce(am([{
+        id: 101,
+        dashboardId: 1,
+        version: 3,
+        parentVersion: 2,
+        description: 'Updated panel',
+        message: 'tuned thresholds',
+        created: '2026-08-30T00:00:00Z',
+        updated: '2026-08-30T01:00:00Z',
+        createdBy: 'alice',
+        updatedBy: 'alice',
+      }]))
+      .mockResolvedValueOnce(am([{
+        id: 201,
+        name: 'ops-live',
+        key: 'ABC123',
+        orgId: 1,
+        userId: 10,
+        external: true,
+        externalUrl: 'https://example.com/s/ABC123',
+        expires: '2026-09-01T00:00:00Z',
+        createdAt: '2026-08-30T00:00:00Z',
+        updatedAt: '2026-08-30T01:00:00Z',
+      }]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaGetAdminStats()).toMatchObject({
+      connected: true,
+      users: 3,
+      orgs: 2,
+      dashboards: 12,
+      snapshots: 2,
+      datasources: 5,
+      playlists: 1,
+      stars: 4,
+      alerts: 6,
+      activeAdmins: 1,
+      activeEditors: 2,
+      activeViewers: 5,
+      activeUsers: 8,
+      activeSessions: 9,
+      statsJson: expect.stringContaining('activeAdmins'),
+    })
+    expect((await client.grafanaListPlugins()).items[0]).toMatchObject({
+      id: 'grafana-piechart-panel',
+      type: 'panel',
+      name: 'Pie Chart',
+      version: '2.0.0',
+      enabled: true,
+      signature: 'valid',
+      infoJson: expect.stringContaining('Grafana Labs'),
+    })
+    expect((await client.grafanaListDashboardVersions('dash-1', {
+      limit: 5,
+      start: 0,
+    })).items[0]).toMatchObject({
+      id: 101,
+      dashboardId: 1,
+      version: 3,
+      parentVersion: 2,
+      createdBy: 'alice',
+      updatedBy: 'alice',
+      message: 'tuned thresholds',
+    })
+    expect((await client.grafanaListDashboardSnapshots()).items[0]).toMatchObject({
+      id: 201,
+      name: 'ops-live',
+      key: 'ABC123',
+      orgId: 1,
+      userId: 10,
+      external: true,
+      externalUrl: 'https://example.com/s/ABC123',
+      expires: '2026-09-01T00:00:00Z',
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://grafana:3000/api/admin/stats')
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/plugins?embedded=true')
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://grafana:3000/api/dashboards/uid/dash-1/versions?limit=5&start=0',
+    )
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/dashboard/snapshots')
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({
