@@ -6,7 +6,7 @@
 |---|---|
 | 项目名 | `dsh-tool-monitoring` |
 | 定位 | DeepSeek Harness 的 Prometheus + Loki + Alertmanager + Grafana 可观测性插件 |
-| 版本 | v0.16.0 |
+| 版本 | v0.17.0 |
 | 架构 | Cordis 插件 + `ctx.tools.register(defineTool(...))` |
 | API | Prometheus HTTP API v1、Loki HTTP API v1、Alertmanager HTTP API v2、Grafana HTTP API |
 | 认证 | Bearer Token 或 HTTP Basic Auth |
@@ -15,7 +15,7 @@
 
 ```text
 src/client.ts      MonitoringClient：fetch 注入、超时、认证、错误映射、写开关
-src/index.ts       79 个 defineTool 定义与插件 apply
+src/index.ts       82 个 defineTool 定义与插件 apply
 tests/client.spec.ts  客户端契约测试
 tests/tools.spec.ts   工具注册、写保护、JSON 参数、业务失败值、UI 呈现测试
 examples/cordis.yml   dsh 组合配置示例
@@ -56,7 +56,9 @@ v0.14 增加 Grafana RBAC 只读巡检：built-in roles 列表/详情、user rol
 
 v0.15 增加 Grafana team roles 只读巡检，并为 user/team roles 补充 `includeHidden` 过滤，新增 1 个工具，插件总数推进到 76 个。只返回团队角色分配，不暴露角色修改或写操作。
 
-v0.16 增加 Prometheus 实例只读巡检：build info、runtime info、flags，共 3 个工具，插件总数推进到 79 个。只返回实例构建、运行与启动参数状态，不暴露配置内容或写操作。
+v0.16 增加 Prometheus 实例只读巡检：build info、runtime info、flags，共 3 个工具，插件总数推进到 79 个。只返回实例构建、运行与启动参数状态，不涉及写操作。
+
+v0.17 增加 Prometheus 目录与路由只读巡检：metric metadata、discovered Alertmanagers、当前配置摘要，共 3 个工具，插件总数推进到 82 个。只返回指标 help/type/unit、发现到的 AM 端点与 YAML 配置快照，不引入配置修改或写操作。
 
 ### 2.2 安全与写保护
 
@@ -83,7 +85,7 @@ v0.16 增加 Prometheus 实例只读巡检：build info、runtime info、flags�
 
 - 即时查询：`GET /api/v1/query?query=...&time=...`。
 - 范围查询：`GET /api/v1/query_range?query=...&start=...&end=...&step=...`。
-- Prometheus 巡检：`/api/v1/targets`、`/api/v1/alerts`、`/api/v1/rules`、`/api/v1/series`、`/api/v1/labels`、`/api/v1/label/{name}/values`、`/api/v1/status/tsdb`、`/api/v1/status/buildinfo`、`/api/v1/status/runtimeinfo`、`/api/v1/status/flags`。
+- Prometheus 巡检：`/api/v1/targets`、`/api/v1/alerts`、`/api/v1/rules`、`/api/v1/series`、`/api/v1/labels`、`/api/v1/label/{name}/values`、`/api/v1/metadata`、`/api/v1/alertmanagers`、`/api/v1/status/tsdb`、`/api/v1/status/buildinfo`、`/api/v1/status/runtimeinfo`、`/api/v1/status/config`、`/api/v1/status/flags`。
 - 删除序列：`POST /api/v1/admin/tsdb/delete_series`，生产环境需要配置 admin API 权限。
 - Loki 查询：`/loki/api/v1/query`、`/loki/api/v1/query_range`。
 - Loki 发现：`/loki/api/v1/labels`、`/loki/api/v1/label/{name}/values`、`/loki/api/v1/series`。
@@ -107,13 +109,13 @@ npm run build
 
 当前测试覆盖：
 
-- Prometheus 查询 URL、Bearer 认证、查询结果映射、build/runtime/flags 状态、系列删除写保护与请求体。
+- Prometheus 查询 URL、Bearer 认证、查询结果映射、build/runtime/flags 状态、metadata/Alertmanagers/config 映射、系列删除写保护与请求体。
 - Loki 范围查询、租户头、labels/values/series/index stats/buildinfo 映射，以及 rule groups/rules/alerts/index volume/volume_range/patterns 映射。
 - Loki detected fields/values 映射。
 - Grafana health、admin stats、datasources、plugins、dashboard 搜索/详情、dashboard versions/snapshots、folders、annotations、alert rules、alert instances、contact points、notification policy、teams、team members、team roles、org users、org preferences、current user/orgs、service accounts、service account tokens、org quotas、folder permissions、dashboard permissions、datasource permissions、access control roles、built-in roles、user roles、user/team access control permissions 映射与 Bearer 认证。
 - Grafana library elements 列表/详情、playlists 列表/详情、current org 映射与分页/Bearer 认证。
 - Alertmanager 状态、告警、分组、静默、接收人映射，以及静默/告警写操作。
-- 79 个工具注册、组件未配置保护、JSON 参数校验、render 纯函数与 present 卡片；当前测试 47 项通过。
+- 82 个工具注册、组件未配置保护、JSON 参数校验、render 纯函数与 present 卡片；当前测试 49 项通过。
 
 ## 4. 后续方向
 

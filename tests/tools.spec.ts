@@ -90,10 +90,13 @@ describe('tool definitions', () => {
       'loki_query_range',
       'prometheus_delete_series',
       'prometheus_get_build_info',
+      'prometheus_get_config',
       'prometheus_get_flags',
       'prometheus_get_label_values',
+      'prometheus_get_metric_metadata',
       'prometheus_get_runtime_info',
       'prometheus_get_tsdb_status',
+      'prometheus_list_alertmanagers',
       'prometheus_list_alerts',
       'prometheus_list_labels',
       'prometheus_list_rules',
@@ -194,6 +197,49 @@ describe('tool definitions', () => {
     expect(fetchImpl.mock.calls[2][0]).toBe(
       'http://prom:9090/api/v1/status/flags',
     )
+  })
+
+  it('executes Prometheus metadata, Alertmanagers, and config read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(prom({
+        http_requests_total: [{
+          type: 'counter',
+          help: 'Total HTTP requests.',
+          unit: 'req',
+        }],
+      }))
+      .mockResolvedValueOnce(prom({
+        activeAlertmanagers: [{
+          url: 'http://am:9093/api/v1/alerts',
+          labels: { cluster: 'prod' },
+        }],
+        droppedAlertmanagers: [{
+          url: 'http://old:9093/api/v1/alerts',
+          labels: { cluster: 'old' },
+        }],
+      }))
+      .mockResolvedValueOnce(prom({ yaml: 'global:\n  scrape_interval: 30s\n' }))
+    const map = tools(new MonitoringClient({ prometheusBaseUrl: 'http://prom:9090', fetchImpl }))
+
+    expect((await map.prometheus_get_metric_metadata.execute({
+      metric: 'http_requests_total',
+      limit: 5,
+    }, exec())).items[0]).toMatchObject({
+      metric: 'http_requests_total',
+      type: 'counter',
+      unit: 'req',
+    })
+    expect(await map.prometheus_list_alertmanagers.execute({}, exec())).toMatchObject({
+      connected: true,
+      activeCount: 1,
+      droppedCount: 1,
+    })
+    expect(await map.prometheus_get_config.execute({}, exec())).toMatchObject({
+      connected: true,
+      configYaml: expect.stringContaining('scrape_interval'),
+    })
+
+    expect(fetchImpl.mock.calls.length).toBe(3)
   })
 
   it('executes a Loki query range and forwards the request', async () => {

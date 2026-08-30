@@ -116,6 +116,40 @@ export interface PrometheusFlagsData {
   flagsJson: string
 }
 
+export interface PrometheusMetadataItem {
+  metric: string
+  type: string
+  help: string
+  unit: string
+}
+
+export interface PrometheusMetadataData {
+  connected: boolean
+  count: number
+  items: PrometheusMetadataItem[]
+  metadataJson: string
+}
+
+export interface PrometheusAlertmanagerItem {
+  url: string
+  state: string
+  labelsJson: string
+}
+
+export interface PrometheusAlertmanagersData {
+  connected: boolean
+  activeCount: number
+  droppedCount: number
+  activeItems: PrometheusAlertmanagerItem[]
+  droppedItems: PrometheusAlertmanagerItem[]
+}
+
+export interface PrometheusConfigData {
+  connected: boolean
+  configYaml: string
+  length: number
+}
+
 export interface LokiQueryData {
   connected: boolean
   resultType: string
@@ -1260,6 +1294,15 @@ function mapTarget(data: unknown): PrometheusTargetItem {
   }
 }
 
+function mapPrometheusAlertmanager(data: unknown): PrometheusAlertmanagerItem {
+  const record = asRecord(data)
+  return {
+    url: asString(record, 'url'),
+    state: asString(record, 'state'),
+    labelsJson: toJson(record.labels),
+  }
+}
+
 export class MonitoringClient {
   private readonly prometheus: ComponentOptions
   private readonly alertmanager: ComponentOptions
@@ -1627,6 +1670,72 @@ export class MonitoringClient {
       connected: true,
       count: Object.keys(data).length,
       flagsJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async getMetadata(
+    options: { metric?: string; limit?: number; signal?: AbortSignal } = {},
+  ): Promise<PrometheusMetadataData> {
+    const params: string[] = []
+    if (options.metric) params.push(`metric=${encodeURIComponent(options.metric)}`)
+    if (options.limit !== undefined && options.limit > 0) params.push(`limit=${Math.floor(options.limit)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = asRecord(await this.prometheusRequest(
+      'GET',
+      `/api/v1/metadata${suffix}`,
+      undefined,
+      options.signal,
+    ))
+    const items: PrometheusMetadataItem[] = []
+    for (const [metric, rawEntries] of Object.entries(data)) {
+      for (const rawEntry of asArray(rawEntries)) {
+        const entry = asRecord(rawEntry)
+        items.push({
+          metric,
+          type: asString(entry, 'type'),
+          help: asString(entry, 'help'),
+          unit: asString(entry, 'unit'),
+        })
+      }
+    }
+    return {
+      connected: true,
+      count: items.length,
+      items,
+      metadataJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async listAlertmanagers(options: { signal?: AbortSignal } = {}): Promise<PrometheusAlertmanagersData> {
+    const data = asRecord(await this.prometheusRequest(
+      'GET',
+      '/api/v1/alertmanagers',
+      undefined,
+      options.signal,
+    ))
+    const active = asArray(data.activeAlertmanagers).map(mapPrometheusAlertmanager)
+    const dropped = asArray(data.droppedAlertmanagers).map(mapPrometheusAlertmanager)
+    return {
+      connected: true,
+      activeCount: active.length,
+      droppedCount: dropped.length,
+      activeItems: active,
+      droppedItems: dropped,
+    }
+  }
+
+  async getConfig(options: { signal?: AbortSignal } = {}): Promise<PrometheusConfigData> {
+    const data = asRecord(await this.prometheusRequest(
+      'GET',
+      '/api/v1/status/config',
+      undefined,
+      options.signal,
+    ))
+    const configYaml = asString(data, 'yaml')
+    return {
+      connected: true,
+      configYaml,
+      length: configYaml.length,
     }
   }
 

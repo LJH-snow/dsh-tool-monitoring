@@ -182,6 +182,63 @@ describe('MonitoringClient', () => {
     )
   })
 
+  it('maps Prometheus metric metadata, discovered Alertmanagers, and config', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(prom({
+        http_requests_total: [{
+          type: 'counter',
+          help: 'Total HTTP requests.',
+          unit: 'req',
+        }],
+        process_cpu_seconds_total: [{
+          type: 'counter',
+          help: 'Total user and system CPU time spent in seconds.',
+          unit: '',
+        }],
+      }))
+      .mockResolvedValueOnce(prom({
+        activeAlertmanagers: [{
+          url: 'http://am:9093/api/v1/alerts',
+          labels: { cluster: 'prod' },
+        }],
+        droppedAlertmanagers: [{
+          url: 'http://old:9093/api/v1/alerts',
+          labels: { cluster: 'old' },
+        }],
+      }))
+      .mockResolvedValueOnce(prom({ yaml: 'global:\n  scrape_interval: 30s\n' }))
+    const client = new MonitoringClient({ prometheusBaseUrl: 'http://prom:9090', fetchImpl })
+
+    const metadata = await client.getMetadata({ metric: 'http_requests_total', limit: 5 })
+    expect(metadata).toMatchObject({ connected: true, count: 2 })
+    expect(metadata.items[0]).toMatchObject({
+      metric: 'http_requests_total',
+      type: 'counter',
+      help: 'Total HTTP requests.',
+      unit: 'req',
+    })
+    expect(metadata.items[1].metric).toBe('process_cpu_seconds_total')
+
+    const alertmanagers = await client.listAlertmanagers()
+    expect(alertmanagers).toMatchObject({ connected: true, activeCount: 1, droppedCount: 1 })
+    expect(alertmanagers.activeItems[0].labelsJson).toContain('prod')
+    expect(alertmanagers.droppedItems[0].url).toBe('http://old:9093/api/v1/alerts')
+
+    const config = await client.getConfig()
+    expect(config).toMatchObject({
+      connected: true,
+      configYaml: expect.stringContaining('scrape_interval'),
+      length: expect.any(Number),
+    })
+    expect(config.length).toBe(config.configYaml.length)
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://prom:9090/api/v1/metadata?metric=http_requests_total&limit=5',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://prom:9090/api/v1/alertmanagers')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://prom:9090/api/v1/status/config')
+  })
+
   it('gates and executes Prometheus series deletion', async () => {
     const fetchImpl = vi.fn()
     const gated = new MonitoringClient({ fetchImpl })

@@ -54,8 +54,11 @@ import {
   type LokiStatusData,
   type LokiVolumeData,
   type PrometheusAlertItem,
+  type PrometheusAlertmanagerItem,
   type PrometheusBuildInfoData,
+  type PrometheusConfigData,
   type PrometheusFlagsData,
+  type PrometheusMetadataItem,
   type PrometheusRuleItem,
   type PrometheusRuntimeInfoData,
   type PrometheusTargetItem,
@@ -519,6 +522,109 @@ export function createTools(client: MonitoringClient) {
       async execute(_args, exec) {
         if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
         return client.getFlags({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'prometheus_get_metric_metadata',
+      description: 'Get Prometheus metric metadata including type, help, and unit, optionally filtered by metric name.',
+      parameters: {
+        metric: { type: 'string', description: 'Optional exact metric name filter' },
+        limit: { type: 'number', description: 'Maximum number of metrics to return; Prometheus default is 10' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            count: { type: 'number' },
+            items: { type: 'array', items: prometheusMetadataItemSchema },
+            metadataJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderPrometheusMetadata(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: args.metric ? `Prometheus metadata: ${args.metric}` : 'Prometheus metadata', kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; count?: number }
+        if (!v.connected) return { card: 'generic', title: 'Prometheus unavailable' }
+        return { card: 'generic', title: `${v.count ?? 0} metadata entrie(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
+        return client.getMetadata({
+          metric: args.metric,
+          limit: args.limit,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'prometheus_list_alertmanagers',
+      description: 'List Prometheus-discovered active and dropped Alertmanagers with endpoint and labels.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            activeCount: { type: 'number' },
+            droppedCount: { type: 'number' },
+            activeItems: { type: 'array', items: prometheusAlertmanagerItemSchema },
+            droppedItems: { type: 'array', items: prometheusAlertmanagerItemSchema },
+          },
+        },
+        render: (_args, value) => renderPrometheusAlertmanagers(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Prometheus Alertmanagers', kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; activeCount?: number; droppedCount?: number }
+        if (!v.connected) return { card: 'generic', title: 'Prometheus unavailable' }
+        return { card: 'generic', title: `${v.activeCount ?? 0} active, ${v.droppedCount ?? 0} dropped` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
+        return client.listAlertmanagers({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'prometheus_get_config',
+      description: 'Get the current Prometheus YAML configuration as a read-only snapshot.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            configYaml: { type: 'string' },
+            length: { type: 'number' },
+          },
+        },
+        render: (_args, value) => renderPrometheusConfig(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Prometheus config', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; length?: number }
+        if (!v.connected) return { card: 'generic', title: 'Prometheus unavailable' }
+        return { card: 'generic', title: `Prometheus config (${v.length ?? 0} chars)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
+        return client.getConfig({ signal: exec.signal })
       },
     }),
 
@@ -3578,6 +3684,27 @@ const prometheusRuleItemSchema = {
   },
 } as const
 
+const prometheusMetadataItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    metric: { type: 'string' },
+    type: { type: 'string' },
+    help: { type: 'string' },
+    unit: { type: 'string' },
+  },
+} as const
+
+const prometheusAlertmanagerItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    url: { type: 'string' },
+    state: { type: 'string' },
+    labelsJson: { type: 'string' },
+  },
+} as const
+
 const alertmanagerAlertItemSchema = {
   type: 'object',
   additionalProperties: false,
@@ -3674,6 +3801,41 @@ function renderPrometheusRuntimeInfo(value: Partial<PrometheusRuntimeInfoData> &
 function renderPrometheusFlags(value: Partial<PrometheusFlagsData> & { reason?: string }) {
   if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
   return text(`count: ${value.count ?? 0}\n${value.flagsJson ?? ''}`)
+}
+
+function renderPrometheusMetadata(value: {
+  connected?: boolean
+  reason?: string
+  items?: Array<Partial<PrometheusMetadataItem>>
+}) {
+  if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
+  if (!value.items?.length) return text('No Prometheus metric metadata found.')
+  return text(value.items.map(item =>
+    `${item.metric ?? ''} (${item.type ?? 'unknown'})${item.unit ? ` unit=${item.unit}` : ''}\n  ${item.help ?? ''}`,
+  ).join('\n'))
+}
+
+function renderPrometheusAlertmanagers(value: {
+  connected?: boolean
+  reason?: string
+  activeItems?: Array<Partial<PrometheusAlertmanagerItem>>
+  droppedItems?: Array<Partial<PrometheusAlertmanagerItem>>
+}) {
+  if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
+  const active = value.activeItems ?? []
+  const dropped = value.droppedItems ?? []
+  const lines = [
+    `active: ${active.length}`,
+    ...active.map(item => `${item.url ?? ''} ${item.labelsJson ?? '{}'}`),
+    `dropped: ${dropped.length}`,
+    ...dropped.map(item => `${item.url ?? ''} ${item.labelsJson ?? '{}'}`),
+  ]
+  return text(lines.join('\n') || 'No Alertmanagers discovered.')
+}
+
+function renderPrometheusConfig(value: Partial<PrometheusConfigData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
+  return text(value.configYaml ?? '')
 }
 
 function renderTargets(value: { items?: Array<Partial<PrometheusTargetItem>> }) {
