@@ -369,6 +369,36 @@ export interface GrafanaOrgQuotaItem {
   used: number
 }
 
+export interface GrafanaFolderPermissionItem {
+  id: number
+  folderId: number
+  role: string
+  permission: number
+  permissionName: string
+  userId: number
+  userLogin: string
+  userEmail: string
+  teamId: number
+  team: string
+}
+
+export interface GrafanaDatasourcePermissionItem {
+  id: number
+  roleName: string
+  isManaged: boolean
+  isInherited: boolean
+  isServiceAccount: boolean
+  userId: number
+  userLogin: string
+  userAvatarUrl: string
+  teamId: number
+  team: string
+  teamAvatarUrl: string
+  builtInRole: string
+  actionsJson: string
+  permission: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -764,6 +794,42 @@ function mapGrafanaOrgQuota(data: unknown): GrafanaOrgQuotaItem {
     target: asString(record, 'target'),
     limit: asNumber(record, 'limit'),
     used: asNumber(record, 'used'),
+  }
+}
+
+function mapGrafanaFolderPermission(data: unknown): GrafanaFolderPermissionItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    folderId: asNumber(record, 'folderId') || asNumber(record, 'folderID'),
+    role: asString(record, 'role'),
+    permission: asNumber(record, 'permission'),
+    permissionName: asString(record, 'permissionName'),
+    userId: asNumber(record, 'userId') || asNumber(record, 'userID'),
+    userLogin: asString(record, 'userLogin'),
+    userEmail: asString(record, 'userEmail'),
+    teamId: asNumber(record, 'teamId') || asNumber(record, 'teamID'),
+    team: asString(record, 'team'),
+  }
+}
+
+function mapGrafanaDatasourcePermission(data: unknown): GrafanaDatasourcePermissionItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    roleName: asString(record, 'roleName'),
+    isManaged: asBoolean(record, 'isManaged'),
+    isInherited: asBoolean(record, 'isInherited'),
+    isServiceAccount: asBoolean(record, 'isServiceAccount'),
+    userId: asNumber(record, 'userId') || asNumber(record, 'userID'),
+    userLogin: asString(record, 'userLogin'),
+    userAvatarUrl: asString(record, 'userAvatarUrl'),
+    teamId: asNumber(record, 'teamId') || asNumber(record, 'teamID'),
+    team: asString(record, 'team'),
+    teamAvatarUrl: asString(record, 'teamAvatarUrl'),
+    builtInRole: asString(record, 'builtInRole'),
+    actionsJson: toJson(record.actions),
+    permission: asString(record, 'permission'),
   }
 }
 
@@ -1832,6 +1898,39 @@ export class MonitoringClient {
       options.signal,
     )
     const items = asArray(data).map(mapGrafanaOrgQuota)
+    return { connected: true, items }
+  }
+
+  async grafanaListFolderPermissions(
+    folderUid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaFolderPermissionItem[]
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/folders/${encodeURIComponent(folderUid)}/permissions`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaFolderPermission)
+    return { connected: true, items }
+  }
+
+  async grafanaListDatasourcePermissions(
+    datasourceUid: string,
+    options: { dsType?: string; signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    items: GrafanaDatasourcePermissionItem[]
+  }> {
+    const suffix = options.dsType ? `?ds_type=${encodeURIComponent(options.dsType)}` : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/access-control/datasources/${encodeURIComponent(datasourceUid)}${suffix}`,
+      options.signal,
+    )
+    const items = asArray(data).map(mapGrafanaDatasourcePermission)
     return { connected: true, items }
   }
 

@@ -740,6 +740,72 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/quotas')
   })
 
+  it('maps Grafana folder and datasource permissions', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am([
+        { id: 1, folderId: 1, role: 'Viewer', permission: 1, permissionName: 'View' },
+        { id: 2, folderId: 1, userId: 10, userLogin: 'alice', userEmail: 'alice@example.com', permission: 4, permissionName: 'Admin' },
+        { id: 3, folderId: 1, teamId: 5, team: 'SRE', permission: 1, permissionName: 'View' },
+      ]))
+      .mockResolvedValueOnce(am([
+        {
+          id: 4,
+          roleName: 'fixed:datasources:reader',
+          isManaged: false,
+          isInherited: false,
+          isServiceAccount: false,
+          userId: 10,
+          userLogin: 'alice',
+          userAvatarUrl: '/avatar/alice',
+          actions: ['datasources:read', 'datasources:query'],
+          permission: 'Query',
+        },
+        {
+          id: 5,
+          roleName: 'basic:admin',
+          isManaged: false,
+          isInherited: false,
+          isServiceAccount: false,
+          builtInRole: 'Admin',
+          actions: ['datasources:query'],
+          permission: 'Edit',
+        },
+      ]))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListFolderPermissions('folder-1')).toMatchObject({
+      connected: true,
+      items: [
+        { role: 'Viewer', permissionName: 'View' },
+        { userId: 10, userLogin: 'alice', userEmail: 'alice@example.com' },
+        { teamId: 5, team: 'SRE' },
+      ],
+    })
+    expect(await client.grafanaListDatasourcePermissions('ds-1', { dsType: 'prometheus' })).toMatchObject({
+      connected: true,
+      items: [
+        {
+          userLogin: 'alice',
+          permission: 'Query',
+          actionsJson: expect.stringContaining('datasources:read'),
+        },
+        { builtInRole: 'Admin', permission: 'Edit' },
+      ],
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/folders/folder-1/permissions',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/datasources/ds-1?ds_type=prometheus',
+    )
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({

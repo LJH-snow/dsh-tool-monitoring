@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、数据源、面板、目录、注解、告警规则、告警实例、服务账号、团队、组织用户、组织配额、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、数据源、面板、目录、注解、告警规则、告警实例、服务账号、团队、组织用户、组织配额、目录与数据源权限、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
 
 插件遵循官方「一切皆插件」架构，通过 `ctx.tools.register(defineTool(...))` 注册模型可见工具，并符合 [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) 契约。
 
@@ -92,9 +92,11 @@ Grafana 工具：
 | `grafana_get_health` | 查看健康状态、数据库状态、版本与 commit | 否 |
 | `grafana_list_datasources` | 查看数据源及安全连接信息 | 否 |
 | `grafana_get_datasource` | 按 UID 查看单个数据源 | 否 |
+| `grafana_list_datasource_permissions` | 按 UID 查看数据源权限，含用户、团队、内置角色与 actions | 否 |
 | `grafana_search_dashboards` | 按 query、tag、starred、分页搜索面板 | 否 |
 | `grafana_get_dashboard` | 按 UID 查看面板 JSON、元数据与 panel 数 | 否 |
 | `grafana_list_folders` | 查看目录 UID、标题与 URL | 否 |
+| `grafana_list_folder_permissions` | 按 UID 查看目录权限，含用户、团队与内置角色授权 | 否 |
 | `grafana_list_annotations` | 按时间、面板、类型与 tags 查看注解 | 否 |
 | `grafana_list_alert_instances` | 查看 Grafana 管理的告警实例 | 否 |
 | `grafana_list_alert_rules` | 查看 Grafana 告警规则的目录、分组、condition 与状态设置 | 否 |

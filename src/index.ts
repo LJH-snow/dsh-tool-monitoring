@@ -14,7 +14,9 @@ import {
   type GrafanaDashboardData,
   type GrafanaDashboardSummaryItem,
   type GrafanaDatasourceItem,
+  type GrafanaDatasourcePermissionItem,
   type GrafanaFolderItem,
+  type GrafanaFolderPermissionItem,
   type GrafanaHealthData,
   type GrafanaNotificationPolicyData,
   type GrafanaOrgUserItem,
@@ -2114,6 +2116,80 @@ export function createTools(client: MonitoringClient) {
         return client.grafanaListOrgQuotas({ signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_folder_permissions',
+      description: 'List permissions for one Grafana folder by UID, including user, team, and built-in role grants.',
+      parameters: {
+        folderUid: { type: 'string', required: true, description: 'Grafana folder UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaFolderPermissionItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaFolderPermissions(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana folder permissions ${args.folderUid ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} permission(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListFolderPermissions(args.folderUid as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_datasource_permissions',
+      description: 'List permissions for one Grafana datasource by UID, including user, team, built-in role, and actions.',
+      parameters: {
+        datasourceUid: { type: 'string', required: true, description: 'Grafana datasource UID' },
+        dsType: { type: 'string', description: 'Optional datasource type to disambiguate duplicate UIDs' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaDatasourcePermissionItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaDatasourcePermissions(value.items ?? [])
+        },
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana datasource permissions ${args.datasourceUid ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} permission(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListDatasourcePermissions(args.datasourceUid as string, {
+          dsType: args.dsType,
+          signal: exec.signal,
+        })
+      },
+    }),
   ]
 }
 
@@ -2366,6 +2442,44 @@ const grafanaOrgQuotaItemSchema = {
     target: { type: 'string' },
     limit: { type: 'number' },
     used: { type: 'number' },
+  },
+} as const
+
+const grafanaFolderPermissionItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    folderId: { type: 'number' },
+    role: { type: 'string' },
+    permission: { type: 'number' },
+    permissionName: { type: 'string' },
+    userId: { type: 'number' },
+    userLogin: { type: 'string' },
+    userEmail: { type: 'string' },
+    teamId: { type: 'number' },
+    team: { type: 'string' },
+  },
+} as const
+
+const grafanaDatasourcePermissionItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    roleName: { type: 'string' },
+    isManaged: { type: 'boolean' },
+    isInherited: { type: 'boolean' },
+    isServiceAccount: { type: 'boolean' },
+    userId: { type: 'number' },
+    userLogin: { type: 'string' },
+    userAvatarUrl: { type: 'string' },
+    teamId: { type: 'number' },
+    team: { type: 'string' },
+    teamAvatarUrl: { type: 'string' },
+    builtInRole: { type: 'string' },
+    actionsJson: { type: 'string' },
+    permission: { type: 'string' },
   },
 } as const
 
@@ -2725,4 +2839,28 @@ function renderGrafanaOrgQuotas(items: Array<Partial<GrafanaOrgQuotaItem>>) {
   return text(items.map(quota =>
     `${quota.target ?? ''} used=${quota.used ?? 0} limit=${quota.limit ?? 0}`,
   ).join('\n'))
+}
+
+function renderGrafanaFolderPermissions(items: Array<Partial<GrafanaFolderPermissionItem>>) {
+  if (!items.length) return text('No Grafana folder permissions found.')
+  return text(items.map(permission => {
+    const principal = permission.userLogin
+      ? `user=${permission.userLogin}`
+      : permission.team
+        ? `team=${permission.team}`
+        : `role=${permission.role ?? 'unknown'}`
+    return `${principal} permission=${permission.permissionName ?? permission.permission ?? 'unknown'}`
+  }).join('\n'))
+}
+
+function renderGrafanaDatasourcePermissions(items: Array<Partial<GrafanaDatasourcePermissionItem>>) {
+  if (!items.length) return text('No Grafana datasource permissions found.')
+  return text(items.map(permission => {
+    const principal = permission.userLogin
+      ? `user=${permission.userLogin}`
+      : permission.team
+        ? `team=${permission.team}`
+        : `role=${permission.builtInRole ?? permission.roleName ?? 'unknown'}`
+    return `${principal} permission=${permission.permission ?? ''} managed=${permission.isManaged ? 'yes' : 'no'} inherited=${permission.isInherited ? 'yes' : 'no'} actions=${permission.actionsJson ?? '[]'}`
+  }).join('\n'))
 }

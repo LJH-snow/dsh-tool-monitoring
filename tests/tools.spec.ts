@@ -37,7 +37,9 @@ describe('tool definitions', () => {
       'grafana_list_alert_rules',
       'grafana_list_annotations',
       'grafana_list_contact_points',
+      'grafana_list_datasource_permissions',
       'grafana_list_datasources',
+      'grafana_list_folder_permissions',
       'grafana_list_folders',
       'grafana_list_org_quotas',
       'grafana_list_org_users',
@@ -537,6 +539,52 @@ describe('tool definitions', () => {
     expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/serviceaccounts/1')
     expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/serviceaccounts/1/tokens')
     expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/org/quotas')
+  })
+
+  it('executes Grafana folder and datasource permission read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json([
+        { id: 1, folderId: 1, role: 'Viewer', permission: 1, permissionName: 'View' },
+        { id: 2, folderId: 1, userId: 10, userLogin: 'alice', userEmail: 'alice@example.com', permission: 4, permissionName: 'Admin' },
+      ]))
+      .mockResolvedValueOnce(json([
+        {
+          id: 4,
+          roleName: 'fixed:datasources:reader',
+          isManaged: false,
+          isInherited: false,
+          isServiceAccount: false,
+          userId: 10,
+          userLogin: 'alice',
+          userAvatarUrl: '/avatar/alice',
+          actions: ['datasources:read', 'datasources:query'],
+          permission: 'Query',
+        },
+      ]))
+    const map = tools(new MonitoringClient({ grafanaBaseUrl: 'http://grafana:3000', fetchImpl }))
+
+    expect((await map.grafana_list_folder_permissions.execute({ folderUid: 'folder-1' }, exec()))).toMatchObject({
+      connected: true,
+      items: [
+        { role: 'Viewer', permissionName: 'View' },
+        { userId: 10, userLogin: 'alice', permissionName: 'Admin' },
+      ],
+    })
+    expect((await map.grafana_list_datasource_permissions.execute({
+      datasourceUid: 'ds-1',
+      dsType: 'prometheus',
+    }, exec())).items[0]).toMatchObject({
+      userLogin: 'alice',
+      permission: 'Query',
+      actionsJson: expect.stringContaining('datasources:read'),
+    })
+    expect(fetchImpl.mock.calls.length).toBe(2)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/folders/folder-1/permissions',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://grafana:3000/api/access-control/datasources/ds-1?ds_type=prometheus',
+    )
   })
 
   it('executes Loki detected field and Grafana alert observation tools', async () => {
