@@ -14,6 +14,7 @@ import {
   type GrafanaAdminStatsData,
   type GrafanaAnnotationItem,
   type GrafanaContactPointItem,
+  type GrafanaCurrentOrgData,
   type GrafanaCurrentUserData,
   type GrafanaDashboardData,
   type GrafanaDashboardPermissionItem,
@@ -25,11 +26,16 @@ import {
   type GrafanaFolderItem,
   type GrafanaFolderPermissionItem,
   type GrafanaHealthData,
+  type GrafanaLibraryElementData,
+  type GrafanaLibraryElementItem,
   type GrafanaNotificationPolicyData,
   type GrafanaOrgPreferencesData,
   type GrafanaOrgUserItem,
   type GrafanaOrgQuotaItem,
   type GrafanaPluginItem,
+  type GrafanaPlaylistDetailData,
+  type GrafanaPlaylistDetailItem,
+  type GrafanaPlaylistItem,
   type GrafanaServiceAccountData,
   type GrafanaServiceAccountItem,
   type GrafanaServiceAccountTokenItem,
@@ -2642,6 +2648,182 @@ export function createTools(client: MonitoringClient) {
         return client.grafanaListCurrentUserOrgs({ signal: exec.signal })
       },
     }),
+
+    defineTool({
+      name: 'grafana_list_library_elements',
+      description: 'Search Grafana library panels and variables with name, type, kind, and pagination filters.',
+      parameters: {
+        searchString: { type: 'string', description: 'Optional library element name search text' },
+        type: { type: 'string', description: 'Optional library element type filter, for example timeseries' },
+        kind: { type: 'string', description: 'Optional library element kind filter, for example panel' },
+        perPage: { type: 'integer', description: 'Elements per page, default Grafana value' },
+        page: { type: 'integer', description: 'Page number, default 1' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            totalCount: { type: 'number' },
+            page: { type: 'number' },
+            perPage: { type: 'number' },
+            items: { type: 'array', items: grafanaLibraryElementItemSchema },
+          },
+        },
+        render: (_args, value) => renderGrafanaLibraryElements(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana library elements ${args.searchString ?? ''}`, kind: 'search' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[]; totalCount?: number }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${v.totalCount ?? (v.items ?? []).length} element(s)` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListLibraryElements({
+          searchString: args.searchString,
+          type: args.type,
+          kind: args.kind,
+          perPage: args.perPage,
+          page: args.page,
+          signal: exec.signal,
+        })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_library_element',
+      description: 'Get one Grafana library element by UID with name, kind, type, model, and metadata.',
+      parameters: {
+        libraryElementUid: { type: 'string', required: true, description: 'Grafana library element UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaLibraryElementItemSchema,
+          },
+        },
+        render: (_args, value) => renderGrafanaLibraryElement(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana library element ${args.libraryElementUid ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { name?: string } }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `Library element ${v.item?.name ?? ''}` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetLibraryElement(args.libraryElementUid as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_list_playlists',
+      description: 'List Grafana playlists with UID, name, interval, and timestamps.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            items: { type: 'array', items: grafanaPlaylistItemSchema },
+          },
+        },
+        render: (_args, value) => {
+          if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+          return renderGrafanaPlaylists(value.items ?? [])
+        },
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana playlists', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; items?: unknown[] }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `${(v.items ?? []).length} playlist(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaListPlaylists({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_playlist',
+      description: 'Get one Grafana playlist by UID with interval and playlist items.',
+      parameters: {
+        playlistUid: { type: 'string', required: true, description: 'Grafana playlist UID' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            item: grafanaPlaylistDetailItemSchema,
+          },
+        },
+        render: (_args, value) => renderGrafanaPlaylist(value),
+      },
+      presentCall(args): ToolCallView {
+        return { card: 'generic', title: `Grafana playlist ${args.playlistUid ?? ''}`, kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; item?: { name?: string } }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `Playlist ${v.item?.name ?? ''}` }
+      },
+      async execute(args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetPlaylist(args.playlistUid as string, { signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'grafana_get_current_org',
+      description: 'Get the current Grafana organization profile with name and address details.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            id: { type: 'number' },
+            name: { type: 'string' },
+            addressJson: { type: 'string' },
+            orgJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderGrafanaCurrentOrg(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Grafana current org', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; name?: string }
+        if (!v.connected) return { card: 'generic', title: 'Grafana unavailable' }
+        return { card: 'generic', title: `Org ${v.name ?? ''}` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasGrafana()) return unavailable('Grafana base URL is not configured.')
+        return client.grafanaGetCurrentOrg({ signal: exec.signal })
+      },
+    }),
   ]
 }
 
@@ -3044,6 +3226,53 @@ const grafanaUserOrgItemSchema = {
     orgId: { type: 'number' },
     name: { type: 'string' },
     role: { type: 'string' },
+  },
+} as const
+
+const grafanaLibraryElementItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    orgId: { type: 'number' },
+    folderId: { type: 'number' },
+    uid: { type: 'string' },
+    name: { type: 'string' },
+    kind: { type: 'number' },
+    type: { type: 'string' },
+    description: { type: 'string' },
+    version: { type: 'number' },
+    created: { type: 'string' },
+    updated: { type: 'string' },
+    modelJson: { type: 'string' },
+    metaJson: { type: 'string' },
+  },
+} as const
+
+const grafanaPlaylistItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    uid: { type: 'string' },
+    name: { type: 'string' },
+    interval: { type: 'string' },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
+  },
+} as const
+
+const grafanaPlaylistDetailItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'number' },
+    uid: { type: 'string' },
+    name: { type: 'string' },
+    interval: { type: 'string' },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
+    itemsJson: { type: 'string' },
   },
 } as const
 
@@ -3515,4 +3744,45 @@ function renderGrafanaUserOrgs(items: Array<Partial<GrafanaUserOrgItem>>) {
   return text(items.map(org =>
     `${org.name ?? ''} (${org.orgId ?? 0}) role=${org.role ?? 'unknown'}`,
   ).join('\n'))
+}
+
+function renderGrafanaLibraryElements(value: {
+  connected?: boolean
+  reason?: string
+  totalCount?: number
+  page?: number
+  perPage?: number
+  items?: Array<Partial<GrafanaLibraryElementItem>>
+}) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  if (!value.items?.length) return text('No Grafana library elements found.')
+  return text(value.items.map(element =>
+    `${element.name ?? ''} (${element.uid ?? ''}) kind=${element.kind ?? 0} type=${element.type ?? ''} version=${element.version ?? 0}`,
+  ).join('\n'))
+}
+
+function renderGrafanaLibraryElement(value: { connected?: boolean; reason?: string; item?: Partial<GrafanaLibraryElementItem> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  const item = value.item
+  if (!item?.uid && !item?.name) return text('No Grafana library element found.')
+  return text(`${item.name ?? ''} (${item.uid ?? ''})\nkind: ${item.kind ?? 0}\ntype: ${item.type ?? ''}\nversion: ${item.version ?? 0}\n${item.modelJson ?? '{}'}`)
+}
+
+function renderGrafanaPlaylists(items: Array<Partial<GrafanaPlaylistItem>>) {
+  if (!items.length) return text('No Grafana playlists found.')
+  return text(items.map(playlist =>
+    `${playlist.name ?? ''} (${playlist.uid ?? ''}) interval=${playlist.interval ?? ''}`,
+  ).join('\n'))
+}
+
+function renderGrafanaPlaylist(value: { connected?: boolean; reason?: string; item?: Partial<GrafanaPlaylistDetailItem> }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  const item = value.item
+  if (!item?.uid && !item?.name) return text('No Grafana playlist found.')
+  return text(`${item.name ?? ''} (${item.uid ?? ''})\ninterval: ${item.interval ?? ''}\n${item.itemsJson ?? '[]'}`)
+}
+
+function renderGrafanaCurrentOrg(value: Partial<GrafanaCurrentOrgData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Grafana is not configured.')
+  return text(`id: ${value.id ?? 0}\nname: ${value.name ?? ''}\naddress: ${value.addressJson ?? '{}'}\n${value.orgJson ?? '{}'}`)
 }

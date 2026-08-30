@@ -528,6 +528,56 @@ export interface GrafanaUserOrgItem {
   role: string
 }
 
+export interface GrafanaLibraryElementItem {
+  id: number
+  orgId: number
+  folderId: number
+  uid: string
+  name: string
+  kind: number
+  type: string
+  description: string
+  version: number
+  created: string
+  updated: string
+  modelJson: string
+  metaJson: string
+}
+
+export interface GrafanaLibraryElementData {
+  connected: boolean
+  totalCount: number
+  page: number
+  perPage: number
+  items: GrafanaLibraryElementItem[]
+}
+
+export interface GrafanaPlaylistItem {
+  id: number
+  uid: string
+  name: string
+  interval: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GrafanaPlaylistDetailItem extends GrafanaPlaylistItem {
+  itemsJson: string
+}
+
+export interface GrafanaPlaylistDetailData {
+  connected: boolean
+  item: GrafanaPlaylistDetailItem
+}
+
+export interface GrafanaCurrentOrgData {
+  connected: boolean
+  id: number
+  name: string
+  addressJson: string
+  orgJson: string
+}
+
 export interface AlertmanagerAlertItem {
   fingerprint: string
   startsAt: string
@@ -1096,6 +1146,45 @@ function mapGrafanaUserOrg(data: unknown): GrafanaUserOrgItem {
     orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
     name: asString(record, 'name'),
     role: asString(record, 'role'),
+  }
+}
+
+function mapGrafanaLibraryElement(data: unknown): GrafanaLibraryElementItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    orgId: asNumber(record, 'orgId') || asNumber(record, 'orgID'),
+    folderId: asNumber(record, 'folderId') || asNumber(record, 'folderID'),
+    uid: asString(record, 'uid'),
+    name: asString(record, 'name'),
+    kind: asNumber(record, 'kind'),
+    type: asString(record, 'type'),
+    description: asString(record, 'description'),
+    version: asNumber(record, 'version'),
+    created: asString(record, 'created') || asString(record, 'createdAt'),
+    updated: asString(record, 'updated') || asString(record, 'updatedAt'),
+    modelJson: toJson(record.model),
+    metaJson: toJson(record.meta),
+  }
+}
+
+function mapGrafanaPlaylist(data: unknown): GrafanaPlaylistItem {
+  const record = asRecord(data)
+  return {
+    id: asNumber(record, 'id'),
+    uid: asString(record, 'uid'),
+    name: asString(record, 'name'),
+    interval: asString(record, 'interval'),
+    createdAt: asString(record, 'createdAt') || asString(record, 'created_at'),
+    updatedAt: asString(record, 'updatedAt') || asString(record, 'updated_at'),
+  }
+}
+
+function mapGrafanaPlaylistDetail(data: unknown): GrafanaPlaylistDetailItem {
+  const record = asRecord(data)
+  return {
+    ...mapGrafanaPlaylist(data),
+    itemsJson: toJson(record.items),
   }
 }
 
@@ -2366,6 +2455,102 @@ export class MonitoringClient {
     const data = await this.grafanaRequest('GET', '/api/user/orgs', options.signal)
     const items = asArray(data).map(mapGrafanaUserOrg)
     return { connected: true, items }
+  }
+
+  async grafanaListLibraryElements(
+    options: {
+      searchString?: string
+      type?: string
+      kind?: string
+      perPage?: number
+      page?: number
+      signal?: AbortSignal
+    } = {},
+  ): Promise<GrafanaLibraryElementData> {
+    const params: string[] = []
+    if (options.searchString) params.push(`searchString=${encodeURIComponent(options.searchString)}`)
+    if (options.type) params.push(`type=${encodeURIComponent(options.type)}`)
+    if (options.kind) params.push(`kind=${encodeURIComponent(options.kind)}`)
+    if (options.perPage && options.perPage > 0) params.push(`perPage=${Math.floor(options.perPage)}`)
+    if (options.page && options.page > 0) params.push(`page=${Math.floor(options.page)}`)
+    const suffix = params.length > 0 ? `?${params.join('&')}` : ''
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/library-elements/search${suffix}`,
+      options.signal,
+    )
+    const root = asRecord(data)
+    const result = asRecord(root.result)
+    const resultElements = asArray(result.elements)
+    const rootElements = asArray(root.elements)
+    const elements = resultElements.length > 0
+      ? resultElements
+      : rootElements.length > 0 ? rootElements : asArray(data)
+    return {
+      connected: true,
+      totalCount: asNumber(result, 'totalCount')
+        || asNumber(root, 'totalCount')
+        || elements.length,
+      page: asNumber(result, 'page') || asNumber(root, 'page') || 1,
+      perPage: asNumber(result, 'perPage')
+        || asNumber(root, 'perPage')
+        || asNumber(result, 'per_page')
+        || 0,
+      items: elements.map(mapGrafanaLibraryElement),
+    }
+  }
+
+  async grafanaGetLibraryElement(
+    uid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{
+    connected: boolean
+    item: GrafanaLibraryElementItem
+  }> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/library-elements/${encodeURIComponent(uid)}`,
+      options.signal,
+    )
+    const root = asRecord(data)
+    const result = asRecord(root.result)
+    const source = asString(result, 'uid') ? result : root
+    return { connected: true, item: mapGrafanaLibraryElement(source) }
+  }
+
+  async grafanaListPlaylists(options: { signal?: AbortSignal } = {}): Promise<{
+    connected: boolean
+    items: GrafanaPlaylistItem[]
+  }> {
+    const data = await this.grafanaRequest('GET', '/api/playlists', options.signal)
+    const items = asArray(data).map(mapGrafanaPlaylist)
+    return { connected: true, items }
+  }
+
+  async grafanaGetPlaylist(
+    uid: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<GrafanaPlaylistDetailData> {
+    const data = await this.grafanaRequest(
+      'GET',
+      `/api/playlists/${encodeURIComponent(uid)}`,
+      options.signal,
+    )
+    const root = asRecord(data)
+    const result = asRecord(root.result)
+    const source = asString(result, 'uid') ? result : root
+    return { connected: true, item: mapGrafanaPlaylistDetail(source) }
+  }
+
+  async grafanaGetCurrentOrg(options: { signal?: AbortSignal } = {}): Promise<GrafanaCurrentOrgData> {
+    const data = asRecord(await this.grafanaRequest('GET', '/api/org', options.signal))
+    return {
+      connected: true,
+      id: asNumber(data, 'id'),
+      name: asString(data, 'name'),
+      addressJson: toJson(data.address),
+      orgJson: JSON.stringify(data ?? {}),
+    }
   }
 
   async deleteSeries(

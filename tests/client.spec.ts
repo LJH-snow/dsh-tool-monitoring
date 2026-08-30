@@ -1104,6 +1104,140 @@ describe('MonitoringClient', () => {
     expect(fetchImpl.mock.calls[4][0]).toBe('http://grafana:3000/api/user/orgs')
   })
 
+  it('maps Grafana library elements, playlists, and current org', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(am({
+        result: {
+          totalCount: 2,
+          page: 1,
+          perPage: 10,
+          elements: [{
+            id: 1,
+            orgId: 1,
+            folderId: 2,
+            uid: 'lib-1',
+            name: 'CPU panel',
+            kind: 1,
+            type: 'timeseries',
+            description: 'Shared CPU panel',
+            version: 3,
+            created: '2026-08-30T00:00:00Z',
+            updated: '2026-08-30T01:00:00Z',
+            model: { type: 'timeseries' },
+            meta: { connectedDashboards: 2 },
+          }],
+        },
+      }))
+      .mockResolvedValueOnce(am({
+        result: {
+          id: 1,
+          orgId: 1,
+          folderId: 2,
+          uid: 'lib-1',
+          name: 'CPU panel',
+          kind: 1,
+          type: 'timeseries',
+          description: 'Shared CPU panel',
+          version: 3,
+          created: '2026-08-30T00:00:00Z',
+          updated: '2026-08-30T01:00:00Z',
+          model: { targets: [{ refId: 'A' }] },
+          meta: {},
+        },
+      }))
+      .mockResolvedValueOnce(am([{
+        id: 1,
+        uid: 'pl-1',
+        name: 'Ops rotation',
+        interval: '5m',
+        createdAt: '2026-08-30T00:00:00Z',
+        updatedAt: '2026-08-30T01:00:00Z',
+      }]))
+      .mockResolvedValueOnce(am({
+        id: 1,
+        uid: 'pl-1',
+        name: 'Ops rotation',
+        interval: '5m',
+        createdAt: '2026-08-30T00:00:00Z',
+        updatedAt: '2026-08-30T01:00:00Z',
+        items: [{
+          id: 1,
+          title: 'Overview',
+          type: 'dashboard_by_uid',
+          value: 'dash-1',
+          order: 1,
+        }],
+      }))
+      .mockResolvedValueOnce(am({
+        id: 1,
+        name: 'Main Org',
+        address: { address1: 'Road 1', city: 'Shanghai', country: 'CN' },
+      }))
+    const client = new MonitoringClient({
+      grafanaBaseUrl: 'http://grafana:3000',
+      grafanaToken: 'gtok',
+      fetchImpl,
+    })
+
+    expect(await client.grafanaListLibraryElements({
+      searchString: 'cpu',
+      type: 'timeseries',
+      kind: 'panel',
+      perPage: 10,
+      page: 1,
+    })).toMatchObject({
+      connected: true,
+      totalCount: 2,
+      page: 1,
+      perPage: 10,
+      items: [{
+        uid: 'lib-1',
+        name: 'CPU panel',
+        kind: 1,
+        modelJson: expect.stringContaining('timeseries'),
+        metaJson: expect.stringContaining('connectedDashboards'),
+      }],
+    })
+    expect(await client.grafanaGetLibraryElement('lib-1')).toMatchObject({
+      connected: true,
+      item: {
+        uid: 'lib-1',
+        name: 'CPU panel',
+        version: 3,
+        modelJson: expect.stringContaining('targets'),
+      },
+    })
+    expect((await client.grafanaListPlaylists()).items[0]).toMatchObject({
+      uid: 'pl-1',
+      name: 'Ops rotation',
+      interval: '5m',
+    })
+    expect(await client.grafanaGetPlaylist('pl-1')).toMatchObject({
+      connected: true,
+      item: {
+        uid: 'pl-1',
+        name: 'Ops rotation',
+        interval: '5m',
+        itemsJson: expect.stringContaining('dashboard_by_uid'),
+      },
+    })
+    expect(await client.grafanaGetCurrentOrg()).toMatchObject({
+      connected: true,
+      id: 1,
+      name: 'Main Org',
+      addressJson: expect.stringContaining('Shanghai'),
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer gtok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://grafana:3000/api/library-elements/search?searchString=cpu&type=timeseries&kind=panel&perPage=10&page=1',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe('http://grafana:3000/api/library-elements/lib-1')
+    expect(fetchImpl.mock.calls[2][0]).toBe('http://grafana:3000/api/playlists')
+    expect(fetchImpl.mock.calls[3][0]).toBe('http://grafana:3000/api/playlists/pl-1')
+    expect(fetchImpl.mock.calls[4][0]).toBe('http://grafana:3000/api/org')
+  })
+
   it('maps Loki detected fields and Grafana annotations and alert instances', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({

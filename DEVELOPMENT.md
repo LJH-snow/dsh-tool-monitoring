@@ -6,7 +6,7 @@
 |---|---|
 | 项目名 | `dsh-tool-monitoring` |
 | 定位 | DeepSeek Harness 的 Prometheus + Loki + Alertmanager + Grafana 可观测性插件 |
-| 版本 | v0.12.0 |
+| 版本 | v0.13.0 |
 | 架构 | Cordis 插件 + `ctx.tools.register(defineTool(...))` |
 | API | Prometheus HTTP API v1、Loki HTTP API v1、Alertmanager HTTP API v2、Grafana HTTP API |
 | 认证 | Bearer Token 或 HTTP Basic Auth |
@@ -15,7 +15,7 @@
 
 ```text
 src/client.ts      MonitoringClient：fetch 注入、超时、认证、错误映射、写开关
-src/index.ts       67 个 defineTool 定义与插件 apply
+src/index.ts       72 个 defineTool 定义与插件 apply
 tests/client.spec.ts  客户端契约测试
 tests/tools.spec.ts   工具注册、写保护、JSON 参数、业务失败值、UI 呈现测试
 examples/cordis.yml   dsh 组合配置示例
@@ -50,6 +50,8 @@ v0.11 增加 Grafana 实例与面板审计只读巡检：admin stats、plugins�
 
 v0.12 增加 Grafana 治理审计只读巡检：user/team access control permissions、org preferences、current user、current user orgs，共 5 个工具，插件总数推进到 67 个。只返回权限、组织偏好与当前身份上下文，不暴露权限修改或写操作。
 
+v0.13 增加 Grafana 资产与组织只读巡检：library elements 列表/详情、playlists 列表/详情、current org，共 5 个工具，插件总数推进到 72 个。只返回面板/变量模型 JSON、播放列表条目 JSON 与组织地址，不暴露写操作或凭据。
+
 ### 2.2 安全与写保护
 
 - 默认端点：Prometheus `http://localhost:9090`，Alertmanager `http://localhost:9093`，Loki `http://localhost:3100`，Grafana `http://localhost:3000`；base URL 自动去掉尾部斜杠，配置为空字符串时禁用对应组件。
@@ -83,7 +85,7 @@ v0.12 增加 Grafana 治理审计只读巡检：user/team access control permiss
 - Loki 规则与告警：`/loki/api/v1/rules`（YAML）、`/prometheus/api/v1/rules`、`/prometheus/api/v1/alerts`。
 - Loki volume 与 patterns：`/loki/api/v1/index/volume`、`/loki/api/v1/index/volume_range`、`/loki/api/v1/patterns`。
 - Loki detected fields：`/loki/api/v1/detected_fields`、`/loki/api/v1/detected_field/{name}/values`。
-- Grafana：`/api/health`、`/api/admin/stats`、`/api/datasources`、`/api/datasources/uid/{uid}`、`/api/plugins`、`/api/search`、`/api/dashboards/uid/{uid}`、`/api/dashboards/uid/{uid}/versions`、`/api/dashboard/snapshots`、`/api/folders`、`/api/annotations`、`/api/alertmanager/grafana/api/v2/alerts`、`/api/v1/provisioning/alert-rules`、`/api/v1/provisioning/alert-rules/{uid}`、`/api/v1/provisioning/contact-points`、`/api/v1/provisioning/policies`、`/api/teams/search`、`/api/teams/{id}`、`/api/teams/{id}/members`、`/api/org/users`、`/api/org/preferences`、`/api/user`、`/api/user/orgs`、`/api/serviceaccounts/search`、`/api/serviceaccounts/{id}`、`/api/serviceaccounts/{id}/tokens`、`/api/org/quotas`、`/api/folders/{uid}/permissions`、`/api/dashboards/uid/{uid}/permissions`、`/api/access-control/datasources/{uid}`、`/api/access-control/roles`、`/api/access-control/roles/{uid}`、`/api/access-control/users/{id}/permissions`、`/api/access-control/teams/{id}/permissions`。
+- Grafana：`/api/health`、`/api/admin/stats`、`/api/datasources`、`/api/datasources/uid/{uid}`、`/api/plugins`、`/api/search`、`/api/dashboards/uid/{uid}`、`/api/dashboards/uid/{uid}/versions`、`/api/dashboard/snapshots`、`/api/folders`、`/api/annotations`、`/api/alertmanager/grafana/api/v2/alerts`、`/api/v1/provisioning/alert-rules`、`/api/v1/provisioning/alert-rules/{uid}`、`/api/v1/provisioning/contact-points`、`/api/v1/provisioning/policies`、`/api/teams/search`、`/api/teams/{id}`、`/api/teams/{id}/members`、`/api/org/users`、`/api/org/preferences`、`/api/org`、`/api/user`、`/api/user/orgs`、`/api/serviceaccounts/search`、`/api/serviceaccounts/{id}`、`/api/serviceaccounts/{id}/tokens`、`/api/org/quotas`、`/api/folders/{uid}/permissions`、`/api/dashboards/uid/{uid}/permissions`、`/api/access-control/datasources/{uid}`、`/api/access-control/roles`、`/api/access-control/roles/{uid}`、`/api/access-control/users/{id}/permissions`、`/api/access-control/teams/{id}/permissions`、`/api/library-elements/search`、`/api/library-elements/{uid}`、`/api/playlists`、`/api/playlists/{uid}`。
 - Alertmanager：`/api/v2/status`、`/api/v2/alerts`、`/api/v2/alerts/groups`、`/api/v2/silences`、`/api/v2/receivers`。
 - 写操作参数使用 JSON 字符串传递：`matchersJson`、`alertsJson`；Loki series selector 使用 `matchesJson`，Grafana annotation tags 使用 `tagsJson`。工具执行前会校验 JSON 数组和必填对象字段。
 - 所有请求合并 `exec.signal` 与 `AbortSignal.timeout`，默认超时 15 秒，`timeoutMs: 0` 可关闭超时。
@@ -103,8 +105,9 @@ npm run build
 - Loki 范围查询、租户头、labels/values/series/index stats/buildinfo 映射，以及 rule groups/rules/alerts/index volume/volume_range/patterns 映射。
 - Loki detected fields/values 映射。
 - Grafana health、admin stats、datasources、plugins、dashboard 搜索/详情、dashboard versions/snapshots、folders、annotations、alert rules、alert instances、contact points、notification policy、teams、team members、org users、org preferences、current user/orgs、service accounts、service account tokens、org quotas、folder permissions、dashboard permissions、datasource permissions、access control roles、user/team access control permissions 映射与 Bearer 认证。
+- Grafana library elements 列表/详情、playlists 列表/详情、current org 映射与分页/Bearer 认证。
 - Alertmanager 状态、告警、分组、静默、接收人映射，以及静默/告警写操作。
-- 67 个工具注册、组件未配置保护、JSON 参数校验、render 纯函数与 present 卡片；当前测试 39 项通过。
+- 72 个工具注册、组件未配置保护、JSON 参数校验、render 纯函数与 present 卡片；当前测试 41 项通过。
 
 ## 4. 后续方向
 
