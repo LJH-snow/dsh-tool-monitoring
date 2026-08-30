@@ -7,6 +7,10 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
 }
 
+function prom(body: unknown): Response {
+  return json({ status: 'success', data: body })
+}
+
 function exec(): ToolRunContext {
   return { signal: new AbortController().signal } as unknown as ToolRunContext
 }
@@ -85,7 +89,10 @@ describe('tool definitions', () => {
       'loki_query',
       'loki_query_range',
       'prometheus_delete_series',
+      'prometheus_get_build_info',
+      'prometheus_get_flags',
       'prometheus_get_label_values',
+      'prometheus_get_runtime_info',
       'prometheus_get_tsdb_status',
       'prometheus_list_alerts',
       'prometheus_list_labels',
@@ -135,6 +142,58 @@ describe('tool definitions', () => {
 
     expect(result).toMatchObject({ connected: true, resultType: 'vector', seriesCount: 1 })
     expect(fetchImpl.mock.calls[0][0]).toBe('http://prom:9090/api/v1/query?query=up')
+  })
+
+  it('executes Prometheus build, runtime, and flag read tools', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(prom({
+        version: '2.55.0',
+        revision: 'abc123',
+        branch: 'HEAD',
+        goVersion: 'go1.22.4',
+        buildUser: 'root@builder',
+        buildDate: '2024-01-01T00:00:00Z',
+      }))
+      .mockResolvedValueOnce(prom({
+        startTime: '2026-08-30T00:00:00Z',
+        CWD: '/prometheus',
+        reloadConfigSuccess: true,
+        lastConfigTime: '2026-08-30T01:00:00Z',
+        goroutineCount: 42,
+        timeSeriesCount: 123,
+      }))
+      .mockResolvedValueOnce(prom({
+        'log.level': 'info',
+        'web.enable-lifecycle': 'false',
+      }))
+    const map = tools(new MonitoringClient({ prometheusBaseUrl: 'http://prom:9090', fetchImpl }))
+
+    expect(await map.prometheus_get_build_info.execute({}, exec())).toMatchObject({
+      connected: true,
+      version: '2.55.0',
+      revision: 'abc123',
+    })
+    expect(await map.prometheus_get_runtime_info.execute({}, exec())).toMatchObject({
+      connected: true,
+      cwd: '/prometheus',
+      reloadConfigSuccess: true,
+      timeSeriesCount: 123,
+    })
+    expect(await map.prometheus_get_flags.execute({}, exec())).toMatchObject({
+      connected: true,
+      count: 2,
+    })
+
+    expect(fetchImpl.mock.calls.length).toBe(3)
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://prom:9090/api/v1/status/buildinfo',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://prom:9090/api/v1/status/runtimeinfo',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://prom:9090/api/v1/status/flags',
+    )
   })
 
   it('executes a Loki query range and forwards the request', async () => {

@@ -88,6 +88,34 @@ export interface PrometheusTsdbData {
   statsJson: string
 }
 
+export interface PrometheusBuildInfoData {
+  connected: boolean
+  version: string
+  revision: string
+  branch: string
+  goVersion: string
+  buildUser: string
+  buildDate: string
+  infoJson: string
+}
+
+export interface PrometheusRuntimeInfoData {
+  connected: boolean
+  startTime: string
+  cwd: string
+  reloadConfigSuccess: boolean
+  lastConfigTime: string
+  goroutineCount: number
+  timeSeriesCount: number
+  runtimeJson: string
+}
+
+export interface PrometheusFlagsData {
+  connected: boolean
+  count: number
+  flagsJson: string
+}
+
 export interface LokiQueryData {
   connected: boolean
   resultType: string
@@ -1547,6 +1575,58 @@ export class MonitoringClient {
       connected: true,
       headSeriesCount: asNumber(headStats, 'numSeries'),
       statsJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async getBuildInfo(options: { signal?: AbortSignal } = {}): Promise<PrometheusBuildInfoData> {
+    const data = asRecord(await this.prometheusRequest(
+      'GET',
+      '/api/v1/status/buildinfo',
+      undefined,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      version: asString(data, 'version'),
+      revision: asString(data, 'revision'),
+      branch: asString(data, 'branch'),
+      goVersion: asString(data, 'goVersion'),
+      buildUser: asString(data, 'buildUser'),
+      buildDate: asString(data, 'buildDate'),
+      infoJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async getRuntimeInfo(options: { signal?: AbortSignal } = {}): Promise<PrometheusRuntimeInfoData> {
+    const data = asRecord(await this.prometheusRequest(
+      'GET',
+      '/api/v1/status/runtimeinfo',
+      undefined,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      startTime: asString(data, 'startTime'),
+      cwd: asString(data, 'CWD'),
+      reloadConfigSuccess: asBoolean(data, 'reloadConfigSuccess'),
+      lastConfigTime: asString(data, 'lastConfigTime'),
+      goroutineCount: asNumber(data, 'goroutineCount'),
+      timeSeriesCount: asNumber(data, 'timeSeriesCount'),
+      runtimeJson: JSON.stringify(data ?? {}),
+    }
+  }
+
+  async getFlags(options: { signal?: AbortSignal } = {}): Promise<PrometheusFlagsData> {
+    const data = asRecord(await this.prometheusRequest(
+      'GET',
+      '/api/v1/status/flags',
+      undefined,
+      options.signal,
+    ))
+    return {
+      connected: true,
+      count: Object.keys(data).length,
+      flagsJson: JSON.stringify(data ?? {}),
     }
   }
 

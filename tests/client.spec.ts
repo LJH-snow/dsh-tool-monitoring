@@ -122,6 +122,66 @@ describe('MonitoringClient', () => {
     expect((await client.getTsdbStatus()).headSeriesCount).toBe(42)
   })
 
+  it('maps Prometheus build info, runtime info, and flags', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(prom({
+        version: '2.55.0',
+        revision: 'abc123',
+        branch: 'HEAD',
+        goVersion: 'go1.22.4',
+        buildUser: 'root@builder',
+        buildDate: '2024-01-01T00:00:00Z',
+      }))
+      .mockResolvedValueOnce(prom({
+        startTime: '2026-08-30T00:00:00Z',
+        CWD: '/prometheus',
+        reloadConfigSuccess: true,
+        lastConfigTime: '2026-08-30T01:00:00Z',
+        goroutineCount: 42,
+        timeSeriesCount: 123,
+      }))
+      .mockResolvedValueOnce(prom({
+        'log.level': 'info',
+        'web.enable-lifecycle': 'false',
+      }))
+    const client = new MonitoringClient({
+      prometheusBaseUrl: 'http://prom:9090',
+      prometheusToken: 'ptok',
+      fetchImpl,
+    })
+
+    expect(await client.getBuildInfo()).toMatchObject({
+      connected: true,
+      version: '2.55.0',
+      revision: 'abc123',
+      goVersion: 'go1.22.4',
+    })
+    expect(await client.getRuntimeInfo()).toMatchObject({
+      connected: true,
+      startTime: '2026-08-30T00:00:00Z',
+      cwd: '/prometheus',
+      reloadConfigSuccess: true,
+      goroutineCount: 42,
+      timeSeriesCount: 123,
+    })
+    expect(await client.getFlags()).toMatchObject({
+      connected: true,
+      count: 2,
+      flagsJson: expect.stringContaining('web.enable-lifecycle'),
+    })
+
+    expect(requestInit(fetchImpl, 0).headers).toMatchObject({ authorization: 'Bearer ptok' })
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'http://prom:9090/api/v1/status/buildinfo',
+    )
+    expect(fetchImpl.mock.calls[1][0]).toBe(
+      'http://prom:9090/api/v1/status/runtimeinfo',
+    )
+    expect(fetchImpl.mock.calls[2][0]).toBe(
+      'http://prom:9090/api/v1/status/flags',
+    )
+  })
+
   it('gates and executes Prometheus series deletion', async () => {
     const fetchImpl = vi.fn()
     const gated = new MonitoringClient({ fetchImpl })

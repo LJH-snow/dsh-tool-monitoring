@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label 与 TSDB 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、管理统计、数据源、插件、面板、目录、注解、告警规则、告警实例、服务账号、团队、组织用户、组织配额、目录/面板/数据源权限、access control 角色、built-in 角色、用户/团队角色分配、用户/团队权限、组织偏好、当前用户上下文、library elements、playlists、当前组织、面板版本与快照、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
+为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）提供可观测性与告警能力的 Cordis 工具插件。Agent 可以查询 Prometheus、查看 target/alert/rule/series/label、TSDB、build、runtime 与命令行 flag 状态，运行 Loki LogQL 查询并查看日志 label、series、index 统计、rule group、rule、告警、index volume、检测到的模式与字段，查看 Grafana 健康状态、管理统计、数据源、插件、面板、目录、注解、告警规则、告警实例、服务账号、团队、组织用户、组织配额、目录/面板/数据源权限、access control 角色、built-in 角色、用户/团队角色分配、用户/团队权限、组织偏好、当前用户上下文、library elements、playlists、当前组织、面板版本与快照、contact point 与通知策略，还可以管理 Alertmanager 的告警、告警分组、静默与接收人。
 
 插件遵循官方「一切皆插件」架构，通过 `ctx.tools.register(defineTool(...))` 注册模型可见工具，并符合 [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) 契约。
 
@@ -62,6 +62,9 @@ Prometheus 工具：
 | `prometheus_list_series` | 按 PromQL selector 查找 series label 集合 | 否 |
 | `prometheus_list_labels` | 查看可用 label 名 | 否 |
 | `prometheus_get_label_values` | 查看某个 label 的值 | 否 |
+| `prometheus_get_build_info` | 查看版本、revision、branch 与 Go build 元数据 | 否 |
+| `prometheus_get_runtime_info` | 查看启动时间、工作目录、重载状态与运行时计数 | 否 |
+| `prometheus_get_flags` | 查看 Prometheus 命令行参数 | 否 |
 | `prometheus_get_tsdb_status` | 查看 TSDB 基线与 head block 统计 | 否 |
 | `prometheus_delete_series` | 按 PromQL selector 删除序列 | 是 |
 

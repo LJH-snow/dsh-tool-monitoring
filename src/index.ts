@@ -54,7 +54,10 @@ import {
   type LokiStatusData,
   type LokiVolumeData,
   type PrometheusAlertItem,
+  type PrometheusBuildInfoData,
+  type PrometheusFlagsData,
   type PrometheusRuleItem,
+  type PrometheusRuntimeInfoData,
   type PrometheusTargetItem,
 } from './client.js'
 
@@ -413,6 +416,109 @@ export function createTools(client: MonitoringClient) {
       async execute(_args, exec) {
         if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
         return client.getTsdbStatus({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'prometheus_get_build_info',
+      description: 'Get Prometheus build information including version, revision, branch, and Go runtime.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            version: { type: 'string' },
+            revision: { type: 'string' },
+            branch: { type: 'string' },
+            goVersion: { type: 'string' },
+            buildUser: { type: 'string' },
+            buildDate: { type: 'string' },
+            infoJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderPrometheusBuildInfo(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Prometheus build info', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; version?: string }
+        if (!v.connected) return { card: 'generic', title: 'Prometheus unavailable' }
+        return { card: 'generic', title: `Prometheus ${v.version ?? ''}` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
+        return client.getBuildInfo({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'prometheus_get_runtime_info',
+      description: 'Get Prometheus runtime information including start time, work directory, and reload status.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            startTime: { type: 'string' },
+            cwd: { type: 'string' },
+            reloadConfigSuccess: { type: 'boolean' },
+            lastConfigTime: { type: 'string' },
+            goroutineCount: { type: 'number' },
+            timeSeriesCount: { type: 'number' },
+            runtimeJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderPrometheusRuntimeInfo(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Prometheus runtime info', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; startTime?: string }
+        if (!v.connected) return { card: 'generic', title: 'Prometheus unavailable' }
+        return { card: 'generic', title: 'Runtime info' }
+      },
+      async execute(_args, exec) {
+        if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
+        return client.getRuntimeInfo({ signal: exec.signal })
+      },
+    }),
+
+    defineTool({
+      name: 'prometheus_get_flags',
+      description: 'Get Prometheus command line flags as a read-only flag map.',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            connected: { type: 'boolean' },
+            reason: { type: 'string' },
+            count: { type: 'number' },
+            flagsJson: { type: 'string' },
+          },
+        },
+        render: (_args, value) => renderPrometheusFlags(value),
+      },
+      presentCall(): ToolCallView {
+        return { card: 'generic', title: 'Prometheus flags', kind: 'read' }
+      },
+      presentResult(_args, result): ToolResultView | undefined {
+        const v = result as unknown as { connected?: boolean; count?: number }
+        if (!v.connected) return { card: 'generic', title: 'Prometheus unavailable' }
+        return { card: 'generic', title: `${v.count ?? 0} flag(s)` }
+      },
+      async execute(_args, exec) {
+        if (!client.hasPrometheus()) return unavailable('Prometheus base URL is not configured.')
+        return client.getFlags({ signal: exec.signal })
       },
     }),
 
@@ -3553,6 +3659,21 @@ function text(textValue: string) {
 function renderQuery(value: { connected?: boolean; reason?: string; resultType?: string; seriesCount?: number; resultJson?: string }) {
   if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
   return text(`${value.resultType ?? 'unknown'} (${value.seriesCount ?? 0} result(s))\n${value.resultJson ?? ''}`)
+}
+
+function renderPrometheusBuildInfo(value: Partial<PrometheusBuildInfoData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
+  return text(`version: ${value.version ?? ''}\nrevision: ${value.revision ?? ''}\nbranch: ${value.branch ?? ''}\ngo: ${value.goVersion ?? ''}\nbuild user: ${value.buildUser ?? ''}\nbuild date: ${value.buildDate ?? ''}`)
+}
+
+function renderPrometheusRuntimeInfo(value: Partial<PrometheusRuntimeInfoData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
+  return text(`start: ${value.startTime ?? ''}\ncwd: ${value.cwd ?? ''}\nlast config: ${value.lastConfigTime ?? ''}\nreload ok: ${value.reloadConfigSuccess ? 'yes' : 'no'}\ngoroutines: ${value.goroutineCount ?? 0}\ntime series: ${value.timeSeriesCount ?? 0}\n${value.runtimeJson ?? ''}`)
+}
+
+function renderPrometheusFlags(value: Partial<PrometheusFlagsData> & { reason?: string }) {
+  if (!value.connected) return text(value.reason ?? 'Prometheus is not configured.')
+  return text(`count: ${value.count ?? 0}\n${value.flagsJson ?? ''}`)
 }
 
 function renderTargets(value: { items?: Array<Partial<PrometheusTargetItem>> }) {

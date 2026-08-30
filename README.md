@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels and TSDB status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, admin stats, datasources, plugins, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder, dashboard and datasource permissions, access control roles, built-in roles, user and team role assignments, user/team permissions, org preferences, current user context, library elements, playlists, current org, dashboard versions and snapshots, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
+A Cordis tool plugin that gives [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) monitoring and alerting capabilities. Agents can query Prometheus, inspect targets, alerts, rules, series, labels, TSDB, build, runtime and command-line flag status, run Loki LogQL queries and inspect log labels, series, index statistics, rule groups, rules, alerts, index volume, detected patterns and detected fields, inspect Grafana health, admin stats, datasources, plugins, dashboards, folders, annotations, alert rules, alert instances, service accounts, teams, org users, org quotas, folder, dashboard and datasource permissions, access control roles, built-in roles, user and team role assignments, user/team permissions, org preferences, current user context, library elements, playlists, current org, dashboard versions and snapshots, contact points and notification policies, and manage Alertmanager alerts, alert groups, silences and receivers.
 
 It follows the official plugin architecture with `ctx.tools.register(defineTool(...))` and the [adding-a-tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-tool.md) contract.
 
@@ -62,6 +62,9 @@ Prometheus tools:
 | `prometheus_list_series` | Find series label sets matching a PromQL selector | no |
 | `prometheus_list_labels` | List label names | no |
 | `prometheus_get_label_values` | List values for one label | no |
+| `prometheus_get_build_info` | Get version, revision, branch, and Go build metadata | no |
+| `prometheus_get_runtime_info` | Get start time, work directory, reload status, and runtime counters | no |
+| `prometheus_get_flags` | Get Prometheus command-line flags | no |
 | `prometheus_get_tsdb_status` | Read TSDB cardinality and head block statistics | no |
 | `prometheus_delete_series` | Delete series matching PromQL selectors | yes |
 
