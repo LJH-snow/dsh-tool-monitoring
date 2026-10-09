@@ -29,6 +29,10 @@ export interface MonitoringClientOptions {
   grafanaPassword?: string
   /** Request timeout in milliseconds. 0 disables the timeout. */
   timeoutMs?: number
+  /** Permit non-local HTTP endpoints. Local HTTP (localhost, .local, and single-label service names) remains available for development. */
+  allowInsecureHttp?: boolean
+  /** Maximum UTF-8 bytes returned in raw JSON/YAML output fields. */
+  maxOutputBytes?: number
   /** Write tools stay disabled unless this is true. */
   allowWrite?: boolean
   fetchImpl?: typeof fetch
@@ -256,6 +260,7 @@ export interface GrafanaDatasourceItem {
   withCredentials: boolean
   database: string
   user: string
+  settingsJson?: string
 }
 
 export interface GrafanaDashboardSummaryItem {
@@ -768,8 +773,75 @@ function asBoolean(record: Record<string, unknown>, key: string): boolean {
   return record[key] === true
 }
 
-function toJson(value: unknown): string {
-  return JSON.stringify(value ?? {})
+const DEFAULT_OUTPUT_MAX_BYTES = 128 * 1024
+const SENSITIVE_KEY = /(?:credential|password|passwd|secret|token|bearer|authorization|webhook|api[_-]?key|access[_-]?key|basic[_-]?auth|client[_-]?(?:secret|certificate|cert|key)|private[_-]?(?:key|certificate|cert)|tls[_-]?(?:auth|certificate|cert|key)|http[_-]?header[_-]?value|secure[_-]?json(?:data|fields)?|oauth[_-]?(?:token|secret|client)|sigv4|azure[_-]?(?:client|secret|token)|gcp[_-]?(?:client|secret|token))/i
+
+function redactSensitiveText(value: string): string {
+  let text = value
+  text = text.replace(/(\bBearer\s+)[^\s,;"'}]+/gi, '$1[REDACTED]')
+  const lines = text.split(/\r?\n/)
+  let sensitiveBlockIndent = -1
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const indent = line.match(/^\s*/)?.[0].length ?? 0
+    if (sensitiveBlockIndent >= 0) {
+      if (!line.trim()) continue
+      if (indent > sensitiveBlockIndent) {
+        lines[index] = line.slice(0, indent) + '[REDACTED]'
+        continue
+      }
+      sensitiveBlockIndent = -1
+    }
+    const blockKey = line.match(/^(\s*)(?:-\s*)?["']?secure[_-]?json(?:data|fields)?["']?\s*:/i)
+    if (!blockKey) continue
+    const colon = line.indexOf(':')
+    const valuePart = line.slice(colon + 1).trim()
+    lines[index] = line.slice(0, colon + 1) + ' [REDACTED]'
+    if (!valuePart || /^[|>]/.test(valuePart)) {
+      sensitiveBlockIndent = blockKey[1].length
+    } else if ((valuePart.startsWith('{') && !valuePart.includes('}')) || (valuePart.startsWith('[') && !valuePart.includes(']'))) {
+      sensitiveBlockIndent = blockKey[1].length
+    }
+  }
+  text = lines.join('\n')
+  const keyValue = /((?:^|[,{\s])["']?(?:credential|password|passwd|secret|token|bearer(?:[_-]?token)?|authorization|webhook|api[_-]?key|access[_-]?key|basic[_-]?auth|client[_-]?(?:secret|certificate|cert|key)|private[_-]?(?:key|certificate|cert)|tls[_-]?(?:auth|certificate|cert|key)|http[_-]?header[_-]?value\d*|secure[_-]?json(?:data|fields)?|oauth[_-]?(?:token|secret|client)|sigv4|azure[_-]?(?:client|secret|token)|gcp[_-]?(?:client|secret|token))["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s,;}\]]+)/gi
+  text = text.replace(keyValue, '$1[REDACTED]')
+  text = text.replace(/([?&](?:credential|password|passwd|secret|token|bearer(?:[_-]?token)?|authorization|webhook|api[_-]?key|access[_-]?key|basic[_-]?auth|client[_-]?(?:secret|certificate|cert|key)|private[_-]?(?:key|certificate|cert)|tls[_-]?(?:auth|certificate|cert|key)|http[_-]?header[_-]?value\d*|secure[_-]?json(?:data|fields)?|oauth[_-]?(?:token|secret|client)|sigv4|azure[_-]?(?:client|secret|token)|gcp[_-]?(?:client|secret|token))=)[^&#\s]+/gi, '$1[REDACTED]')
+  text = text.replace(/(\b[a-z][a-z\d+.-]*:\/\/)[^/\s:@]+:[^@\s/]+@/gi, '$1[REDACTED]:[REDACTED]@')
+  return text
+}
+
+function sanitizeValue(value: unknown, key?: string): unknown {
+  if (key && SENSITIVE_KEY.test(key)) return '[REDACTED]'
+  if (typeof value === 'string') return redactSensitiveText(value)
+  if (Array.isArray(value)) return value.map(item => sanitizeValue(item))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
+      childKey,
+      sanitizeValue(childValue, childKey),
+    ]))
+  }
+  return value
+}
+
+function truncateUtf8(value: string, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): string {
+  const limit = Number.isFinite(maxBytes) ? Math.max(1, Math.floor(maxBytes)) : DEFAULT_OUTPUT_MAX_BYTES
+  if (Buffer.byteLength(value, 'utf8') <= limit) return value
+  let result = Buffer.from(value, 'utf8').subarray(0, limit).toString('utf8')
+  while (result && Buffer.byteLength(result, 'utf8') > limit) result = result.slice(0, -1)
+  return result
+}
+
+function safeJson(value: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): string {
+  try {
+    return truncateUtf8(JSON.stringify(sanitizeValue(value) ?? {}) ?? '{}', maxBytes)
+  } catch {
+    return '[UNAVAILABLE]'
+  }
+}
+
+function toJson(value: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): string {
+  return safeJson(value ?? {}, maxBytes)
 }
 
 function isInfrastructureError(error: unknown): boolean {
@@ -777,26 +849,48 @@ function isInfrastructureError(error: unknown): boolean {
     && (error.status === 401 || error.status === 403 || error.status === 429 || error.status >= 500)
 }
 
+function normalizeOutputLimit(value: number | undefined): number {
+  if (!Number.isFinite(value) || value === undefined) return DEFAULT_OUTPUT_MAX_BYTES
+  return Math.max(1, Math.floor(value))
+}
+
+function isLocalHttpHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return host === 'localhost' || host === '::1' || host.endsWith('.local') || !host.includes('.')
+}
+
+function endpointSecurityError(baseUrl: string, component: Component, allowInsecureHttp: boolean): MonitoringError | undefined {
+  if (!baseUrl) return undefined
+  try {
+    const url = new URL(baseUrl)
+    if (url.protocol === 'https:' || (url.protocol === 'http:' && (allowInsecureHttp || isLocalHttpHost(url.hostname)))) return undefined
+    if (url.protocol !== 'http:') return new MonitoringError(component + ' endpoint must use HTTPS.', 400)
+    return new MonitoringError(component + ' endpoint uses HTTP. Set allowInsecureHttp: true only for a trusted local network.', 400)
+  } catch {
+    return new MonitoringError(component + ' endpoint URL is invalid.', 400)
+  }
+}
+
 function writeDisabledReason(): string {
   return 'Write operations are disabled. Set allowWrite: true in the plugin config.'
 }
 
-function mapQueryData(data: unknown): PrometheusQueryData {
+function mapQueryData(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): PrometheusQueryData {
   const record = asRecord(data)
   const result = asArray(record.result)
   return {
     connected: true,
     resultType: asString(record, 'resultType'),
     seriesCount: result.length,
-    resultJson: JSON.stringify(result),
+    resultJson: safeJson(result, maxBytes),
   }
 }
 
 function mapStringItems(data: unknown): string[] {
-  return asArray(data).map(value => typeof value === 'string' ? value : String(value ?? ''))
+  return asArray(data).map(value => typeof value === 'string' ? redactSensitiveText(value) : String(value ?? ''))
 }
 
-function mapLokiQueryData(data: unknown): LokiQueryData {
+function mapLokiQueryData(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): LokiQueryData {
   const record = asRecord(data)
   const result = asArray(record.result)
   const entryCount = result.reduce((count: number, rawItem) => {
@@ -808,11 +902,11 @@ function mapLokiQueryData(data: unknown): LokiQueryData {
     resultType: asString(record, 'resultType'),
     seriesCount: result.length,
     entryCount,
-    resultJson: JSON.stringify(result),
+    resultJson: safeJson(result, maxBytes),
   }
 }
 
-function mapLokiVolumeData(data: unknown): LokiVolumeData {
+function mapLokiVolumeData(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): LokiVolumeData {
   const record = asRecord(data)
   const result = asArray(record.result)
   let totalBytes = 0
@@ -831,11 +925,11 @@ function mapLokiVolumeData(data: unknown): LokiVolumeData {
     resultType: asString(record, 'resultType'),
     seriesCount: result.length,
     totalBytes,
-    resultJson: JSON.stringify(result),
+    resultJson: safeJson(result, maxBytes),
   }
 }
 
-function mapLokiPatterns(data: unknown): LokiPatternItem[] {
+function mapLokiPatterns(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): LokiPatternItem[] {
   return asArray(data).map(rawItem => {
     const record = asRecord(rawItem)
     const samples = asArray(record.samples)
@@ -847,25 +941,26 @@ function mapLokiPatterns(data: unknown): LokiPatternItem[] {
       pattern: asString(record, 'pattern'),
       sampleCount: samples.length,
       totalCount,
-      samplesJson: JSON.stringify(samples),
+      samplesJson: safeJson(samples, maxBytes),
     }
   })
 }
 
-function mapGrafanaDatasource(data: unknown): GrafanaDatasourceItem {
+function mapGrafanaDatasource(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): GrafanaDatasourceItem {
   const record = asRecord(data)
   return {
     id: asNumber(record, 'id'),
     uid: asString(record, 'uid'),
     name: asString(record, 'name'),
     type: asString(record, 'type'),
-    url: asString(record, 'url'),
+    url: redactSensitiveText(asString(record, 'url')),
     access: asString(record, 'access'),
     isDefault: asBoolean(record, 'isDefault'),
     basicAuth: asBoolean(record, 'basicAuth'),
     withCredentials: asBoolean(record, 'withCredentials'),
     database: asString(record, 'database'),
     user: asString(record, 'user'),
+    settingsJson: toJson(record.secureJsonData ?? record.jsonData ?? record.settings, maxBytes),
   }
 }
 
@@ -875,7 +970,7 @@ function mapGrafanaDashboardSummary(data: unknown): GrafanaDashboardSummaryItem 
     id: asNumber(record, 'id'),
     uid: asString(record, 'uid'),
     title: asString(record, 'title'),
-    url: asString(record, 'url'),
+    url: redactSensitiveText(asString(record, 'url')),
     type: asString(record, 'type'),
     tags: asArray(record.tags).map(tag => typeof tag === 'string' ? tag : String(tag ?? '')),
     isStarred: asBoolean(record, 'isStarred'),
@@ -900,7 +995,7 @@ function mapLokiDetectedField(data: unknown): LokiDetectedFieldItem {
     label: asString(record, 'label'),
     type: asString(record, 'type'),
     cardinality: asNumber(record, 'cardinality'),
-    parsersJson: JSON.stringify(asArray(record.parsers)),
+    parsersJson: safeJson(asArray(record.parsers)),
     jsonPath: asString(record, 'jsonPath'),
   }
 }
@@ -936,7 +1031,7 @@ function mapGrafanaAlertInstance(data: unknown): GrafanaAlertInstanceItem {
   }
 }
 
-function mapGrafanaAlertRule(data: unknown): GrafanaAlertRuleItem {
+function mapGrafanaAlertRule(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): GrafanaAlertRuleItem {
   const record = asRecord(data)
   return {
     uid: asString(record, 'uid'),
@@ -947,7 +1042,7 @@ function mapGrafanaAlertRule(data: unknown): GrafanaAlertRuleItem {
     panelId: asNumber(record, 'panelID') || asNumber(record, 'panelId'),
     ruleGroup: asString(record, 'ruleGroup') || asString(record, 'rule_group'),
     condition: asString(record, 'condition'),
-    dataJson: toJson(record.data),
+    dataJson: toJson(record.data, maxBytes),
     noDataState: asString(record, 'noDataState') || asString(record, 'no_data_state'),
     execErrState: asString(record, 'execErrState') || asString(record, 'exec_err_state'),
     duration: asString(record, 'for') || asString(record, 'duration') || asString(record, 'forDuration'),
@@ -955,33 +1050,33 @@ function mapGrafanaAlertRule(data: unknown): GrafanaAlertRuleItem {
     paused: asBoolean(record, 'paused'),
     updated: asString(record, 'updated'),
     version: asNumber(record, 'version'),
-    labelsJson: toJson(record.labels),
-    annotationsJson: toJson(record.annotations),
-    ruleJson: JSON.stringify(data ?? {}),
+    labelsJson: toJson(record.labels, maxBytes),
+    annotationsJson: toJson(record.annotations, maxBytes),
+    ruleJson: safeJson(data ?? {}, maxBytes),
   }
 }
 
-function mapGrafanaContactPoint(data: unknown): GrafanaContactPointItem {
+function mapGrafanaContactPoint(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): GrafanaContactPointItem {
   const record = asRecord(data)
   return {
     uid: asString(record, 'uid'),
     name: asString(record, 'name'),
     type: asString(record, 'type'),
-    settingsJson: toJson(record.settings),
+    settingsJson: toJson(record.settings, maxBytes),
     disableResolveMessage: asBoolean(record, 'disableResolveMessage'),
   }
 }
 
-function mapGrafanaNotificationPolicy(data: unknown): GrafanaNotificationPolicyData {
+function mapGrafanaNotificationPolicy(data: unknown, maxBytes = DEFAULT_OUTPUT_MAX_BYTES): GrafanaNotificationPolicyData {
   const record = asRecord(data)
   return {
     connected: true,
     receiver: asString(record, 'receiver'),
-    groupByJson: toJson(record.group_by),
+    groupByJson: toJson(record.group_by, maxBytes),
     groupWait: asString(record, 'group_wait'),
     groupInterval: asString(record, 'group_interval'),
     repeatInterval: asString(record, 'repeat_interval'),
-    policyJson: JSON.stringify(data ?? {}),
+    policyJson: safeJson(data ?? {}, maxBytes),
   }
 }
 
@@ -1238,7 +1333,7 @@ function mapGrafanaOrgPreferences(data: unknown): GrafanaOrgPreferencesData {
     homeDashboardUid: asString(record, 'homeDashboardUID') || asString(record, 'home_dashboard_uid'),
     timezone: asString(record, 'timezone'),
     weekStart: asString(record, 'weekStart') || asString(record, 'week_start'),
-    prefsJson: JSON.stringify(data ?? {}),
+    prefsJson: safeJson(data ?? {}),
   }
 }
 
@@ -1258,7 +1353,7 @@ function mapGrafanaCurrentUser(data: unknown): GrafanaCurrentUserData {
     createdAt: asString(record, 'createdAt'),
     theme: asString(record, 'theme'),
     authLabelsJson: toJson(record.authLabels),
-    userJson: JSON.stringify(data ?? {}),
+    userJson: safeJson(data ?? {}),
   }
 }
 
@@ -1320,7 +1415,7 @@ function countPanels(panels: unknown): number {
 function mapTarget(data: unknown): PrometheusTargetItem {
   const record = asRecord(data)
   return {
-    scrapeUrl: asString(record, 'scrapeUrl'),
+    scrapeUrl: redactSensitiveText(asString(record, 'scrapeUrl')),
     health: asString(record, 'health'),
     lastError: asString(record, 'lastError'),
     labelsJson: toJson(record.labels),
@@ -1330,7 +1425,7 @@ function mapTarget(data: unknown): PrometheusTargetItem {
 function mapPrometheusAlertmanager(data: unknown): PrometheusAlertmanagerItem {
   const record = asRecord(data)
   return {
-    url: asString(record, 'url'),
+    url: redactSensitiveText(asString(record, 'url')),
     state: asString(record, 'state'),
     labelsJson: toJson(record.labels),
   }
@@ -1344,6 +1439,8 @@ export class MonitoringClient {
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
   private readonly allowWrite: boolean
+  private readonly allowInsecureHttp: boolean
+  private readonly maxOutputBytes: number
 
   constructor(options: MonitoringClientOptions = {}) {
     this.prometheus = {
@@ -1374,6 +1471,8 @@ export class MonitoringClient {
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch
     this.timeoutMs = options.timeoutMs ?? 15_000
     this.allowWrite = options.allowWrite ?? false
+    this.allowInsecureHttp = options.allowInsecureHttp ?? false
+    this.maxOutputBytes = normalizeOutputLimit(options.maxOutputBytes)
   }
 
   hasPrometheus(): boolean {
@@ -1429,6 +1528,8 @@ export class MonitoringClient {
       ? this.prometheus
       : component === 'loki' ? this.loki
         : component === 'grafana' ? this.grafana : this.alertmanager
+    const endpointError = endpointSecurityError(options.baseUrl, component, this.allowInsecureHttp)
+    if (endpointError) throw endpointError
     const response = await this.fetchImpl(`${options.baseUrl}${path}`, {
       method,
       headers: this.headers(component),
@@ -1503,6 +1604,8 @@ export class MonitoringClient {
   }
 
   private async lokiTextRequest(path: string, signal?: AbortSignal): Promise<string> {
+    const endpointError = endpointSecurityError(this.loki.baseUrl, 'loki', this.allowInsecureHttp)
+    if (endpointError) throw endpointError
     const headers = this.headers('loki')
     headers.accept = 'application/yaml, text/yaml, text/plain, application/json, */*;q=0.1'
     const response = await this.fetchImpl(`${this.loki.baseUrl}${path}`, {
@@ -1521,7 +1624,7 @@ export class MonitoringClient {
       }
       throw new MonitoringError(message, response.status)
     }
-    return raw
+    return truncateUtf8(redactSensitiveText(raw), this.maxOutputBytes)
   }
 
   async query(
@@ -1531,7 +1634,7 @@ export class MonitoringClient {
     const queryPart = `query=${encodeURIComponent(query)}`
     const timePart = options.time ? `&time=${encodeURIComponent(options.time)}` : ''
     const data = await this.prometheusRequest('GET', `/api/v1/query?${queryPart}${timePart}`, undefined, options.signal)
-    return mapQueryData(data)
+    return mapQueryData(data, this.maxOutputBytes)
   }
 
   async queryRange(
@@ -1549,7 +1652,7 @@ export class MonitoringClient {
       undefined,
       options.signal,
     )
-    return mapQueryData(data)
+    return mapQueryData(data, this.maxOutputBytes)
   }
 
   async listTargets(options: { signal?: AbortSignal } = {}): Promise<PrometheusTargetData> {
@@ -1618,7 +1721,7 @@ export class MonitoringClient {
     if (options.start) path += `&start=${encodeURIComponent(options.start)}`
     if (options.end) path += `&end=${encodeURIComponent(options.end)}`
     const data = await this.prometheusRequest('GET', path, undefined, options.signal)
-    const items = asArray(data).map(series => ({ labelsJson: toJson(series) }))
+    const items = asArray(data).map(series => ({ labelsJson: toJson(series, this.maxOutputBytes) }))
     return { connected: true, items }
   }
 
@@ -1650,7 +1753,7 @@ export class MonitoringClient {
     return {
       connected: true,
       headSeriesCount: asNumber(headStats, 'numSeries'),
-      statsJson: JSON.stringify(data ?? {}),
+      statsJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -1669,7 +1772,7 @@ export class MonitoringClient {
       goVersion: asString(data, 'goVersion'),
       buildUser: asString(data, 'buildUser'),
       buildDate: asString(data, 'buildDate'),
-      infoJson: JSON.stringify(data ?? {}),
+      infoJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -1688,7 +1791,7 @@ export class MonitoringClient {
       lastConfigTime: asString(data, 'lastConfigTime'),
       goroutineCount: asNumber(data, 'goroutineCount'),
       timeSeriesCount: asNumber(data, 'timeSeriesCount'),
-      runtimeJson: JSON.stringify(data ?? {}),
+      runtimeJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -1702,7 +1805,7 @@ export class MonitoringClient {
     return {
       connected: true,
       count: Object.keys(data).length,
-      flagsJson: JSON.stringify(data ?? {}),
+      flagsJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -1735,7 +1838,7 @@ export class MonitoringClient {
       connected: true,
       count: items.length,
       items,
-      metadataJson: JSON.stringify(data ?? {}),
+      metadataJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -1767,8 +1870,8 @@ export class MonitoringClient {
     const configYaml = asString(data, 'yaml')
     return {
       connected: true,
-      configYaml,
-      length: configYaml.length,
+      configYaml: truncateUtf8(redactSensitiveText(configYaml), this.maxOutputBytes),
+      length: truncateUtf8(redactSensitiveText(configYaml), this.maxOutputBytes).length,
     }
   }
 
@@ -1791,7 +1894,7 @@ export class MonitoringClient {
       undefined,
       options.signal,
     )
-    return mapLokiQueryData(data)
+    return mapLokiQueryData(data, this.maxOutputBytes)
   }
 
   async lokiQueryRange(
@@ -1819,7 +1922,7 @@ export class MonitoringClient {
       undefined,
       options.signal,
     )
-    return mapLokiQueryData(data)
+    return mapLokiQueryData(data, this.maxOutputBytes)
   }
 
   async lokiListLabels(
@@ -1883,7 +1986,7 @@ export class MonitoringClient {
       undefined,
       options.signal,
     )
-    const items = asArray(data).map(series => ({ labelsJson: toJson(series) }))
+    const items = asArray(data).map(series => ({ labelsJson: toJson(series, this.maxOutputBytes) }))
     return { connected: true, items }
   }
 
@@ -1910,7 +2013,7 @@ export class MonitoringClient {
       chunks: asNumber(data, 'chunks'),
       entries: asNumber(data, 'entries'),
       bytes: asNumber(data, 'bytes'),
-      statsJson: JSON.stringify(data ?? {}),
+      statsJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -1923,7 +2026,7 @@ export class MonitoringClient {
       branch: asString(data, 'branch'),
       buildDate: asString(data, 'buildDate'),
       goVersion: asString(data, 'goVersion'),
-      statusJson: JSON.stringify(data ?? {}),
+      statusJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -2022,7 +2125,7 @@ export class MonitoringClient {
       undefined,
       options.signal,
     )
-    return mapLokiVolumeData(data)
+    return mapLokiVolumeData(data, this.maxOutputBytes)
   }
 
   async lokiGetIndexVolumeRange(
@@ -2052,7 +2155,7 @@ export class MonitoringClient {
       undefined,
       options.signal,
     )
-    return mapLokiVolumeData(data)
+    return mapLokiVolumeData(data, this.maxOutputBytes)
   }
 
   async lokiGetPatterns(
@@ -2079,7 +2182,7 @@ export class MonitoringClient {
       undefined,
       options.signal,
     )
-    return { connected: true, items: mapLokiPatterns(data) }
+    return { connected: true, items: mapLokiPatterns(data, this.maxOutputBytes) }
   }
 
   async lokiGetDetectedFields(
@@ -2163,7 +2266,7 @@ export class MonitoringClient {
       database: asString(data, 'database'),
       version: asString(data, 'version'),
       commit: asString(data, 'commit'),
-      statusJson: JSON.stringify(data ?? {}),
+      statusJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -2172,7 +2275,7 @@ export class MonitoringClient {
     items: GrafanaDatasourceItem[]
   }> {
     const data = await this.grafanaRequest('GET', '/api/datasources', options.signal)
-    const items = asArray(data).map(mapGrafanaDatasource)
+    const items = asArray(data).map(item => mapGrafanaDatasource(item, this.maxOutputBytes))
     return { connected: true, items }
   }
 
@@ -2188,7 +2291,7 @@ export class MonitoringClient {
       `/api/datasources/uid/${encodeURIComponent(uid)}`,
       options.signal,
     )
-    return { connected: true, item: mapGrafanaDatasource(data) }
+    return { connected: true, item: mapGrafanaDatasource(data, this.maxOutputBytes) }
   }
 
   async grafanaSearchDashboards(
@@ -2235,10 +2338,10 @@ export class MonitoringClient {
       connected: true,
       uid: asString(dashboard, 'uid'),
       title: asString(dashboard, 'title'),
-      url: asString(dashboard, 'url') || asString(meta, 'url') || `/d/${encodeURIComponent(uid)}`,
+      url: redactSensitiveText(asString(dashboard, 'url') || asString(meta, 'url') || `/d/${encodeURIComponent(uid)}`),
       panelCount: countPanels(panels),
-      dashboardJson: JSON.stringify(data.dashboard ?? {}),
-      metaJson: JSON.stringify(data.meta ?? {}),
+      dashboardJson: safeJson(data.dashboard ?? {}, this.maxOutputBytes),
+      metaJson: safeJson(data.meta ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -2318,7 +2421,7 @@ export class MonitoringClient {
       '/api/v1/provisioning/alert-rules',
       options.signal,
     )
-    const items = asArray(data).map(mapGrafanaAlertRule)
+    const items = asArray(data).map(item => mapGrafanaAlertRule(item, this.maxOutputBytes))
     return { connected: true, items }
   }
 
@@ -2334,7 +2437,7 @@ export class MonitoringClient {
       `/api/v1/provisioning/alert-rules/${encodeURIComponent(uid)}`,
       options.signal,
     )
-    return { connected: true, item: mapGrafanaAlertRule(data) }
+    return { connected: true, item: mapGrafanaAlertRule(data, this.maxOutputBytes) }
   }
 
   async grafanaListContactPoints(options: { signal?: AbortSignal } = {}): Promise<{
@@ -2346,7 +2449,7 @@ export class MonitoringClient {
       '/api/v1/provisioning/contact-points',
       options.signal,
     )
-    const items = asArray(data).map(mapGrafanaContactPoint)
+    const items = asArray(data).map(item => mapGrafanaContactPoint(item, this.maxOutputBytes))
     return { connected: true, items }
   }
 
@@ -2356,7 +2459,7 @@ export class MonitoringClient {
       '/api/v1/provisioning/policies',
       options.signal,
     )
-    return mapGrafanaNotificationPolicy(data)
+    return mapGrafanaNotificationPolicy(data, this.maxOutputBytes)
   }
 
   async grafanaListTeams(
@@ -2456,7 +2559,7 @@ export class MonitoringClient {
       addressJson: toJson(data.address),
       createdAt: asString(data, 'createdAt') || asString(data, 'created'),
       updatedAt: asString(data, 'updatedAt') || asString(data, 'updated'),
-      orgJson: JSON.stringify(data ?? {}),
+      orgJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -2716,7 +2819,7 @@ export class MonitoringClient {
       activeViewers: asNumber(data, 'activeViewers'),
       activeUsers: asNumber(data, 'activeUsers'),
       activeSessions: asNumber(data, 'activeSessions'),
-      statsJson: JSON.stringify(data ?? {}),
+      statsJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -2911,7 +3014,7 @@ export class MonitoringClient {
       id: asNumber(data, 'id'),
       name: asString(data, 'name'),
       addressJson: toJson(data.address),
-      orgJson: JSON.stringify(data ?? {}),
+      orgJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -2946,7 +3049,7 @@ export class MonitoringClient {
       connected: true,
       uptime: asString(record, 'uptime'),
       version: asString(versionInfo, 'version'),
-      statusJson: JSON.stringify(data ?? {}),
+      statusJson: safeJson(data ?? {}, this.maxOutputBytes),
     }
   }
 
@@ -3001,7 +3104,7 @@ export class MonitoringClient {
         receiver: asString(record, 'receiver'),
         labelsJson: toJson(record.labels),
         alertCount: alerts.length,
-        alertsJson: JSON.stringify(alerts),
+        alertsJson: safeJson(alerts, this.maxOutputBytes),
       }
     })
     return { connected: true, items }

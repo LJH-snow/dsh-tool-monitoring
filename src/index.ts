@@ -88,6 +88,8 @@ export interface MonitoringPluginConfig {
   grafanaUsername?: string
   grafanaPassword?: string
   timeoutMs?: number
+  allowInsecureHttp?: boolean
+  maxOutputBytes?: number
   allowWrite?: boolean
 }
 
@@ -3361,6 +3363,7 @@ const grafanaDatasourceItemSchema = {
     withCredentials: { type: 'boolean' },
     database: { type: 'string' },
     user: { type: 'string' },
+    settingsJson: { type: 'string' },
   },
 } as const
 

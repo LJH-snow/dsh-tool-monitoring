@@ -39,6 +39,9 @@ Load the plugin in a dsh composition config (`cordis.yml`):
     grafanaBaseUrl: 'http://grafana:3000'             # optional, default http://localhost:3000
     grafanaToken: 'plain_token_or_Bearer_token'       # optional
     timeoutMs: 15000                                  # optional, default 15000
+    # Non-local HTTP endpoints are rejected; set only for a trusted local network.
+    allowInsecureHttp: false
+    maxOutputBytes: 131072                            # optional, default 128 KiB
     allowWrite: false                                 # optional, write tools are disabled by default
 ```
 
@@ -47,6 +50,8 @@ Full example: [examples/cordis.yml](examples/cordis.yml).
 Each component can also use HTTP Basic Auth with `prometheusUsername`/`prometheusPassword`, `alertmanagerUsername`/`alertmanagerPassword`, `lokiUsername`/`lokiPassword`, or `grafanaUsername`/`grafanaPassword`. Set a base URL to an empty string to disable that component and return an explicit `connected: false` business value.
 
 > Security: write tools are gated by `allowWrite`. Keep it `false` unless the dsh runtime is explicitly allowed to delete Prometheus series, create or delete Alertmanager silences, or send alerts.
+
+> Security: non-local monitoring endpoints must use HTTPS. Local hostnames (for example `localhost` or a single-label service name) may use HTTP for development; set `allowInsecureHttp: true` only for a trusted network. Raw YAML/JSON fields are recursively redacted for credentials, webhooks, tokens, passwords, `basic_auth`, `bearer_token`, and capped at `maxOutputBytes`.
 
 ## Tools
 
