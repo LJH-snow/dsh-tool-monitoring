@@ -39,6 +39,9 @@ npm install github:LJH-snow/dsh-tool-monitoring
     grafanaBaseUrl: 'http://grafana:3000'             # 可选，默认 http://localhost:3000
     grafanaToken: 'plain_token_or_Bearer_token'       # 可选
     timeoutMs: 15000                                  # 可选，默认 15000
+    # 非本地 HTTP endpoint 会拒绝；仅可信本地网络才设置为 true
+    allowInsecureHttp: false
+    maxOutputBytes: 131072                            # 可选，默认 128 KiB
     allowWrite: false                                 # 可选，写工具默认关闭
 ```
 
@@ -47,6 +50,8 @@ npm install github:LJH-snow/dsh-tool-monitoring
 四个组件都支持 Token 或 Basic Auth：Prometheus 使用 `prometheusToken`/`prometheusUsername`/`prometheusPassword`，Alertmanager 使用 `alertmanagerToken`/`alertmanagerUsername`/`alertmanagerPassword`，Loki 使用 `lokiToken`/`lokiUsername`/`lokiPassword`，Grafana 使用 `grafanaToken`/`grafanaUsername`/`grafanaPassword`。将 base URL 配置为空字符串可禁用对应组件，此时读工具返回明确的 `{ connected: false, reason }`。多租户 Loki 可额外配置 `lokiTenantId`。
 
 > 安全说明：写工具由 `allowWrite` 控制。除非允许 dsh 删除 Prometheus 序列、创建或删除 Alertmanager 静默、发送告警，否则保持关闭。
+
+> 安全说明：非本地 monitoring endpoint 必须使用 HTTPS。本地 hostname（例如 `localhost` 或单段 service 名称）可在开发环境使用 HTTP；仅可信网络才设置 `allowInsecureHttp: true`。原始 YAML/JSON 字段会递归脱敏 credential、webhook、token、password、`basic_auth`、`bearer_token`，并按 `maxOutputBytes` 限制大小。
 
 ## 提供的工具
 

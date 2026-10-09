@@ -1,7 +1,7 @@
 {
   "name": "@libai168/dsh-tool-monitoring",
   "description": "Monitoring and alerting tools for DeepSeek Harness: Prometheus queries, targets, alerts, rules, series, labels, metric metadata, TSDB, config and runtime status, discovered Alertmanagers, Alertmanager, Loki LogQL, Grafana dashboards, admin stats, plugins, dashboard versions and snapshots, alert rules, annotations, service accounts, teams, organizations, org users, org quotas, folder, dashboard and datasource permissions, access control roles, built-in roles, user and team role assignments, user/team permissions, org preferences, current user context, library elements, playlists, current org, contact points and notification policies, plus observability status",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

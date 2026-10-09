@@ -18,6 +18,76 @@ function requestInit(fetchImpl: ReturnType<typeof vi.fn>, callIndex = 0): Reques
 }
 
 describe('MonitoringClient', () => {
+  it('redacts credentials from raw monitoring payloads and enforces an output byte limit', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(prom({ yaml: [
+        'secureJsonData:',
+        '  providerSpecificField: raw-secure-value',
+        'secureJsonData: { providerSpecificField: inline-secure-value }',
+        'secureJsonData: {',
+        '  providerSpecificField: "multiline } secure-value",',
+        '  secondField: multiline-inline-secret',
+        '}',
+        'secureJsonData: |-',
+        '  scalar-secure-value',
+        'global:',
+        '  password: prom-secret',
+        '  bearer_token: abc123',
+        '  client_secret: client-secret-value',
+        '  tls_auth: tls-secret-value',
+        '  httpHeaderValue1: header-secret-value',
+      ].join('\n') }))
+      .mockResolvedValueOnce(json([{
+        uid: 'ds-1',
+        name: 'Prometheus',
+        type: 'prometheus',
+        url: 'https://prom.example.com',
+        secureJsonData: {
+          password: 'grafana-secret',
+          bearerToken: 'token-xyz',
+          httpHeaderValue1: 'header-datasource-secret',
+          tlsAuth: 'tls-datasource-secret',
+          nested: { tls_auth: 'nested-tls-secret' },
+        },
+      }]))
+      .mockResolvedValueOnce(json({
+        dashboard: { uid: 'dash-1', title: 'Ops', panels: [{ targets: [{ expr: 'password=panel-secret' }] }] },
+        meta: { webhook: 'https://hooks.example.test/secret' },
+      }))
+      .mockResolvedValueOnce(json({
+        status: 'success',
+        data: { resultType: 'streams', result: [{ stream: { token: 'loki-token' }, values: [['1', 'password=loki-secret ' + 'x'.repeat(400)]] }] },
+      }))
+    const client = new MonitoringClient({
+      prometheusBaseUrl: 'http://prom:9090',
+      grafanaBaseUrl: 'http://grafana:3000',
+      lokiBaseUrl: 'http://loki:3100',
+      fetchImpl,
+      maxOutputBytes: 180,
+    })
+
+    const config = await client.getConfig()
+    const datasource = await client.grafanaListDatasources()
+    const dashboard = await client.grafanaGetDashboard('dash-1')
+    const logs = await client.lokiQueryRange('{app="api"}', { start: '1', end: '2' })
+
+    for (const value of [config.configYaml, datasource.items[0].settingsJson ?? '', dashboard.dashboardJson, logs.resultJson]) {
+      expect(value).not.toMatch(/prom-secret|abc123|client-secret-value|tls-secret-value|header-secret-value|raw-secure-value|inline-secure-value|multiline } secure-value|multiline-inline-secret|scalar-secure-value|grafana-secret|token-xyz|header-datasource-secret|tls-datasource-secret|nested-tls-secret|panel-secret|hooks\.example\.test\/secret|loki-token|loki-secret/)
+      expect(Buffer.byteLength(value, 'utf8')).toBeLessThanOrEqual(180)
+    }
+  })
+
+  it('rejects remote plain HTTP endpoints unless insecure HTTP is explicitly enabled', async () => {
+    const fetchImpl = vi.fn()
+    const client = new MonitoringClient({
+      prometheusBaseUrl: 'http://prom.example.com:9090',
+      fetchImpl,
+    })
+
+    await expect(client.query('up')).rejects.toThrow(/HTTPS|HTTP.*allowInsecureHttp/i)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
   it('runs a Prometheus instant query and maps vector results', async () => {
     const fetchImpl = vi.fn()
     fetchImpl.mockResolvedValueOnce(prom({

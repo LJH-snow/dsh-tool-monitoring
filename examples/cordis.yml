@@ -23,6 +23,10 @@
     # grafanaToken: ''
     # grafanaUsername: ''
     # grafanaPassword: ''
+    # 非本地 HTTP endpoint 会拒绝；仅可信本地网络才设置为 true
+    allowInsecureHttp: false
+    # 原始 YAML/JSON 输出上限（字节）
+    maxOutputBytes: 131072
     # 写操作默认关闭;确认权限后再开启
     allowWrite: true
     timeoutMs: 15000
